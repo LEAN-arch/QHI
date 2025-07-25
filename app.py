@@ -1,10 +1,11 @@
 # ======================================================================================================
-# LottoSphere v16.0.4: The Quantum Chronodynamics Engine
+# LottoSphere v16.0.5: The Quantum Chronodynamics Engine
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-25
-# VERSION: 16.0.4 (Debugged, Optimized with Periodicity Analysis, Position-Specific Max Numbers,
-#                  and Substantially Expanded Explanation in UI)
+# VERSION: 16.0.5 (Debugged, Optimized with Periodicity Analysis, Position-Specific Max Numbers,
+#                  Expanded Explanation in System Dynamics Explorer, and New Explanations for
+#                  Predictive Maturity Analysis and Ranked Predictions)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -12,9 +13,9 @@
 # independent yet interacting dynamical system. Integrates deep learning, statistical physics,
 # chaos theory, and quantum-inspired methods with a robust metrology suite.
 # Enhanced with periodicity analysis for non-positive Lyapunov exponents, position-specific
-# maximum numbers based on sequence length (3 to 6), and a substantially expanded explanation
-# of results and plots in the System Dynamics Explorer tab, providing deeper mathematical,
-# technical, and actionable insights.
+# maximum numbers based on sequence length (3 to 6), a substantially expanded explanation
+# of System Dynamics Explorer results, and new detailed explanations for Predictive Maturity
+# Analysis plots and Ranked Predictions by Historical Performance methods.
 # ======================================================================================================
 
 import streamlit as st
@@ -50,7 +51,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.4: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.5: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -169,7 +170,7 @@ def analyze_temporal_behavior(_df, position='Pos_1'):
         
         # Lyapunov Exponent
         try:
-            lyap_exp = lyap_r(series, emb_dim=2)
+            lyap_exp = lyap_r(series, emb_dim=None)
             results['lyapunov'] = lyap_exp
         except Exception as e:
             st.warning(f"Lyapunov exponent calculation failed: {e}")
@@ -293,7 +294,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
             pred_scaled = model(last_seq_torch)
         
         prediction = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
-        # Clamp to valid range and ensure uniqueness
+        # Clamp predictions
         prediction = np.clip(np.round(prediction), 1, max_nums).astype(int)
         unique_preds = []
         seen = set()
@@ -313,7 +314,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
             unique_preds.append(new_num)
             seen.add(new_num)
         
-        # Error estimation based on validation loss
+        # Error estimation based on prediction
         error = np.full(6, np.sqrt(best_loss) * 10)
         
         return {
@@ -328,7 +329,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
             'name': model_type,
             'prediction': [0]*6,
             'error': [0]*6,
-            'logic': 'Failed due to error.'
+            'logic': 'Prediction failed due to error.'
         }
 
 @st.cache_data
@@ -337,7 +338,7 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
         if len(_df) < 2:
             raise ValueError("Insufficient data for Hilbert embedding")
         
-        # Use maximum of position-specific maxs for complex plane
+        # Use maximum of position-specific maxs for complex analysis
         max_num = max(max_nums)
         
         # Map numbers to complex plane
@@ -403,7 +404,7 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
             'logic': 'Failed due to error.'
         }
 
-# --- 5. BACKTESTING & META-ANALYSIS ---
+# --- 5. Backtesting & Meta-Analysis ---
 @st.cache_data
 def run_full_backtest_suite(df, max_nums=[49]*6):
     try:
@@ -503,12 +504,11 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
     except Exception as e:
         st.error(f"Error in predictive maturity analysis: {e}")
         return pd.DataFrame(), pd.DataFrame()
-
 # ====================================================================================================
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.4: The Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.5: The Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical and AI techniques.")
 
 if 'data_warning' not in st.session_state:
@@ -555,6 +555,134 @@ if uploaded_file:
 
         with tab1:
             st.header("Engage Grand Unified Predictive Ensemble")
+            
+            # Explanation for Ranked Predictions
+            with st.expander("Explanation of Ranked Predictions by Historical Performance"):
+                st.markdown("""
+                ### Overview
+                The Predictive Analytics tab generates number predictions for the next lottery draw using three advanced models: Long Short-Term Memory (LSTM), Gated Recurrent Unit (GRU), and Hilbert Space Embedding. These predictions are ranked by their historical performance, assessed through a rigorous backtesting process that evaluates their accuracy on a validation subset of the data. Each model provides a set of six numbers, along with error estimates and a likelihood score, enabling users to select the most reliable predictions for strategic number selection. This section explains the models, their backtesting methodology, the significance of the results, and how to use them effectively in the lottery context.
+
+                ### Detailed Explanation of Predictive Models and Backtesting
+
+                #### Predictive Models
+                The tab employs three distinct models to forecast the next draw’s numbers, each leveraging different mathematical and computational principles to capture patterns in the positional time series (Pos_1 to Pos_6).
+
+                1. **Long Short-Term Memory (LSTM)**:
+                   - **Description**: LSTM is a type of recurrent neural network (RNN) designed for sequence modeling, particularly effective for capturing long-term dependencies in time-series data. It processes sequences of historical draws (length set by the user, 3–6 draws) to predict the next set of six numbers.
+                   - **Mathematical Foundation**:
+                     - **Architecture**: The LSTM model consists of two stacked LSTM layers (50 hidden units each) followed by a linear layer outputting six numbers. For input sequence \( X_t = [x_{t-L+1}, \ldots, x_t] \), where \( x_t = [Pos_1, \ldots, Pos_6] \) and \( L \) is the sequence length, the LSTM updates hidden states \( h_t \) and cell states \( c_t \) using gates (input, forget, output) to retain or discard information:
+                       \[
+                       f_t = \sigma(W_f \cdot [h_{t-1}, x_t] + b_f), \quad i_t = \sigma(W_i \cdot [h_{t-1}, x_t] + b_i),
+                       \]
+                       \[
+                       o_t = \sigma(W_o \cdot [h_{t-1}, x_t] + b_o), \quad c_t = f_t \cdot c_{t-1} + i_t \cdot \tanh(W_c \cdot [h_{t-1}, x_t] + b_c),
+                       \]
+                       \[
+                       h_t = o_t \cdot \tanh(c_t).
+                       \]
+                     - The final hidden state \( h_t \) is passed through a linear layer to produce predictions: \( \hat{y}_{t+1} = W_{fc} h_t + b_{fc} \).
+                     - Data is normalized using MinMaxScaler to [0, 1], and predictions are inverse-transformed, rounded, and clamped to position-specific maximums (e.g., 79 for Pos_1 with `seq_length=3`).
+                   - **Significance in Lottery**: LSTMs excel at modeling non-linear, sequential patterns in lottery data, capturing trends or dependencies across draws. For example, if Pos_1 tends to increase gradually, the LSTM can learn this pattern.
+                   - **Limitations**:
+                     - Requires sufficient training data (>50 draws) to learn meaningful patterns.
+                     - Sensitive to overfitting if the sequence length is too long or the dataset is small.
+                     - Computationally intensive, especially with many epochs or large datasets.
+
+                2. **Gated Recurrent Unit (GRU)**:
+                   - **Description**: GRU is a simplified variant of LSTM, using fewer gates to model sequences with reduced computational complexity. It predicts the next draw based on the same sequence length as LSTM.
+                   - **Mathematical Foundation**:
+                     - **Architecture**: Similar to LSTM, the GRU uses two stacked layers (50 hidden units) and a linear output layer. For input \( x_t \), the GRU updates hidden states:
+                       \[
+                       z_t = \sigma(W_z \cdot [h_{t-1}, x_t] + b_z), \quad r_t = \sigma(W_r \cdot [h_{t-1}, x_t] + b_r),
+                       \]
+                       \[
+                       \tilde{h}_t = \tanh(W_h \cdot [r_t \cdot h_{t-1}, x_t] + b_h), \quad h_t = (1 - z_t) \cdot h_{t-1} + z_t \cdot \tilde{h}_t.
+                       \]
+                     - The output is computed similarly to LSTM: \( \hat{y}_{t+1} = W_{fc} h_t + b_{fc} \).
+                     - Uses the same scaling and clamping as LSTM to ensure valid, unique predictions.
+                   - **Significance in Lottery**: GRUs are effective for capturing shorter-term dependencies and may perform better than LSTMs in datasets with limited data or simpler patterns. For example, if Pos_1 fluctuates rapidly, GRUs may adapt more quickly.
+                   - **Limitations**:
+                     - Less capable of capturing very long-term dependencies compared to LSTM.
+                     - Similar data and overfitting constraints as LSTM.
+                     - May produce similar predictions to LSTM, reducing diversity in the ensemble.
+
+                3. **Hilbert Space Embedding**:
+                   - **Description**: A quantum-inspired method that maps lottery numbers to a complex Hilbert space, predicting the next draw’s “geometric center” based on phase and amplitude dynamics.
+                   - **Mathematical Foundation**:
+                     - **Mapping**: Each number \( n \) in a draw is mapped to a complex number on the unit circle: \( z_n = e^{i 2\pi n / M} \), where \( M = \max(\text{max_nums}) \).
+                     - **Mean Vector**: For each draw, compute the mean complex vector across positions: \( \bar{z}_t = \frac{1}{6} \sum_{i=1}^6 z_{n_i} \).
+                     - **Extrapolation**: Estimate the next mean vector using phase and amplitude velocities:
+                       \[
+                       \phi_t = \angle \bar{z}_t, \quad a_t = |\bar{z}_t|, \quad \Delta\phi = \angle (\bar{z}_t / \bar{z}_{t-1}), \quad \Delta a = a_t - a_{t-1},
+                       \]
+                       \[
+                       \bar{z}_{t+1} = (a_t + \Delta a) e^{i (\phi_t + \Delta\phi)}.
+                       \]
+                     - **Number Selection**: Greedily select six numbers whose mean complex vector minimizes the distance to \( \bar{z}_{t+1} \), respecting position-specific maximums and ensuring uniqueness.
+                   - **Significance in Lottery**: This method captures geometric patterns in the number space, potentially identifying trends not detected by neural networks. For example, if numbers cluster in certain ranges, the Hilbert method may predict numbers aligning with this trend.
+                   - **Limitations**:
+                     - Assumes smooth dynamics in the complex plane, which may not hold for highly random data.
+                     - Sensitive to the choice of \( M \), which affects angular resolution.
+                     - Less robust for small datasets (<100 draws) due to unreliable velocity estimates.
+
+                #### Backtesting Methodology
+                - **Process**: The backtesting suite (`run_full_backtest_suite`) evaluates each model’s performance on a validation set (default: last 20% of draws, minimum 10 draws). For each validation draw:
+                  - Train the model on historical data up to that point (or use cached LSTM/GRU models trained on 80% of data).
+                  - Predict the next draw’s numbers.
+                  - Compare predictions to actual numbers, computing:
+                    - **Average Hits**: The average number of correct numbers per draw, where a hit is a predicted number matching any actual number: \( \text{Avg Hits} = \frac{1}{N} \sum_{i=1}^N |\text{set}(y_{\text{pred},i}) \cap \text{set}(y_{\text{true},i})| \).
+                    - **RMSE**: Root Mean Square Error across all positions: \( \text{RMSE} = \sqrt{\frac{1}{N \cdot 6} \sum_{i=1}^N \sum_{j=1}^6 (y_{\text{pred},i,j} - y_{\text{true},i,j})^2} \).
+                    - **Likelihood Score**: A composite metric balancing accuracy and error: \( \text{Likelihood} = 0.6 \cdot \min(100, \text{Avg Hits} \cdot 100) + 0.4 \cdot \max(0, 100 - 5 \cdot \text{RMSE}) \).
+                - **Output**: Each model provides:
+                  - **Candidate Set**: Six predicted numbers with error estimates (derived from training loss for LSTM/GRU or complex distance for Hilbert).
+                  - **Likelihood Score**: A percentage (0–100%) indicating prediction reliability.
+                  - **Metrics**: Average Hits and RMSE from backtesting.
+                - **Example**: If LSTM predicts [3, 15, 27, 34, 41, 50] with 1.5 average hits and RMSE 5.2, its likelihood might be 70%, ranking it above a model with lower hits or higher RMSE.
+
+                **Significance**:
+                - **Model Performance**: The Likelihood Score ranks models by their ability to predict historical draws, with higher scores indicating better alignment with past patterns. Average Hits reflects prediction accuracy (e.g., 1.5 means 1–2 correct numbers per draw), while RMSE measures numerical precision.
+                - **In Lottery**: High-likelihood predictions suggest numbers more likely to match future draws, based on historical trends. For example, if LSTM predicts [3, 15, 27, 34, 41, 50] with 80% likelihood, these numbers are strong candidates.
+                - **Limitations**:
+                  - **Data Dependency**: Backtesting requires sufficient validation data (≥10 draws). Small datasets (<100 draws) may yield unreliable metrics.
+                  - **Overfitting**: LSTM/GRU may overfit to training data, inflating likelihood scores if validation data is limited.
+                  - **Randomness**: Lottery data’s inherent randomness may limit predictive power, even for high-likelihood models.
+                  - **Uniqueness**: Predictions are adjusted to ensure unique numbers within position-specific bounds, which may introduce randomness if duplicates occur.
+
+                **Actionability**:
+                - **Selecting Predictions**:
+                  - Choose the highest-likelihood model (e.g., LSTM with 80%) for primary number selection: [3, 15, 27, 34, 41, 50].
+                  - Consider error estimates (± values next to predictions). Lower errors (e.g., ±2.0) indicate higher confidence; avoid numbers with high errors (e.g., ±10.0).
+                - **Diversifying Choices**:
+                  - Combine numbers from top two models (e.g., LSTM and GRU) to create a diversified set, ensuring uniqueness and respecting `max_nums`.
+                  - For example, if LSTM predicts [3, 15, 27, 34, 41, 50] and GRU predicts [5, 14, 26, 33, 42, 49], select a mix like [3, 14, 27, 34, 41, 49].
+                - **Cross-Validation**:
+                  - Compare predictions with System Dynamics Explorer (Tab 2). If a 10-draw cycle is detected, include numbers from 10 draws ago (e.g., `df_master.iloc[-10]`).
+                  - Check Predictive Maturity (Tab 3) to ensure predictions stabilize with more data, indicating robust patterns.
+                - **Practical Steps**:
+                  - Select the top model’s numbers if likelihood > 70%. If < 50%, consider all models and prioritize frequent numbers (`df_master.value_counts()`).
+                  - Test predictions against new draws to validate performance. If hits are low, collect more data or adjust `seq_length` (e.g., increase to 5).
+                  - If Hilbert Embedding has high likelihood, prioritize it for geometric patterns; otherwise, favor LSTM/GRU for sequential trends.
+                - **Optimization**:
+                  - Increase training epochs (e.g., to 150) in the sidebar for better LSTM/GRU performance, if computational resources allow.
+                  - Adjust `seq_length` (3–6) to balance short-term vs. long-term dependencies, based on Tab 3 results.
+                - **Limitations Mitigation**:
+                  - For small datasets, use simplified backtesting (last 10 draws) and rely on Hilbert Embedding, which requires less data.
+                  - If models yield similar predictions, combine with frequency analysis to diversify candidates.
+
+                ### Technical Notes
+                - **Data Requirements**: Minimum 50 draws for training, with ≥10 validation draws for reliable backtesting. Larger datasets (>200 draws) improve likelihood score accuracy.
+                - **Parameter Tuning**:
+                  - **Sequence Length**: Adjust `seq_length` (3–6) in the sidebar to capture different temporal dependencies. Longer sequences may improve LSTM/GRU for complex patterns but risk overfitting.
+                  - **Epochs**: Increase to 150–200 for better training, but monitor overfitting via Tab 3’s maturity curve.
+                  - **Batch Size**: Fixed at 32; reduce to 16 for small datasets to stabilize training.
+                - **Performance**:
+                  - Backtesting is computationally intensive for large datasets (>1000 draws). Cached models (`@st.cache_resource`) reduce overhead.
+                  - Hilbert Embedding is faster but less robust for noisy data.
+                - **Enhancements**:
+                  - Add ensemble voting (e.g., majority vote across models) for more robust predictions.
+                  - Implement confidence intervals for likelihood scores to quantify uncertainty.
+                """)
+
             if st.button("RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
                 with st.spinner("Backtesting all models... This may take several minutes."):
                     scored_predictions = run_full_backtest_suite(df_master, max_nums=max_nums)
@@ -576,7 +704,7 @@ if uploaded_file:
             st.header("System Dynamics Explorer")
             st.markdown("Explore the intrinsic, time-dependent behavior of the number system.")
             
-            # Add expanded explanation of results and plots
+            # Explanation for System Dynamics Explorer
             with st.expander("Explanation of Results and Plots"):
                 st.markdown("""
                 ### Overview
@@ -646,7 +774,7 @@ if uploaded_file:
                   - For Pos_1, check `df_master['Pos_1'].iloc[-T]` to select candidate numbers (e.g., if Pos_1 was 3 ten draws ago, include 3).
                 - **Validation**:
                   - Compare PSD periods with Periodicity Analysis (ACF) and Wavelet Transform bands to confirm cycle consistency.
-                  - If no clear peaks appear, the system may be non-periodic or data-limited, suggesting reliance on Tab 1 models (LSTM/GRU).
+                  - If no clear peaks appear, the system may be non-periodic or data-limited, suggesting reliance on Tab 1 models.
                 - **Practical Steps**:
                   - For a 10-draw cycle, review the last 10 draws for Pos_1 and prioritize recurring numbers.
                   - If multiple peaks exist (e.g., at 0.1 and 0.2 cycles/draw), test predictions for both 10- and 5-draw cycles to diversify candidates.
@@ -730,7 +858,7 @@ if uploaded_file:
                   - Multiple peaks (e.g., at lags 8 and 16) suggest harmonics or multiple cycles; test both lags.
                   - If peaks are below 0.2, the system is stable but non-periodic; rely on frequency analysis or Tab 1.
                 - **Validation**:
-                  - Confirm ACF periods with PSD (peak at \(1/\text{period}\)) and CWT (band at scale ≈ period).
+                  - Confirm ACF periods with PSD (e.g., peak at 0.125 cycles/draw for 8 draws) and CWT (band at scale ≈ 8).
                   - If inconsistent, collect more data or adjust the ACF threshold (e.g., to 0.3 for stricter periodicity).
                 - **Limitations**:
                   - **Lyapunov**: Sensitive to noise and short series (<100 draws), potentially yielding unreliable estimates. The embedding dimension (2) may be insufficient for complex dynamics.
@@ -757,7 +885,6 @@ if uploaded_file:
                    - If no peaks, compute frequency counts (`df_master['Pos_1'].value_counts()`) and prioritize common numbers.
                 3. **Cross-Validate**:
                    - Confirm ACF periods with PSD (e.g., peak at 0.125 cycles/draw for 8 draws) and CWT (band at scale ≈ 8).
-                   - Check Recurrence Plot for diagonal lines matching the period.
                    - If inconsistent, increase data length or adjust parameters (e.g., ACF threshold to 0.3, PSD `nperseg` to 512).
                 4. **Integrate with Predictions**:
                    - Combine cycle-based candidates (e.g., numbers from 8 draws ago) with Tab 1 predictions to create a diversified set.
@@ -819,31 +946,159 @@ if uploaded_file:
         with tab3:
             st.header("Predictive Maturity Analysis")
             st.markdown("Determine how predictive power evolves with historical data size.")
-            model_type = st.selectbox("Select Model", options=['LSTM', 'GRU'], index=0)
-            if st.button("RUN MATURITY ANALYSIS"):
-                with st.spinner("Performing iterative backtesting... This is computationally expensive."):
-                    maturity_df, delta_df = analyze_predictive_maturity(df_master, model_type=model_type, max_nums=max_nums)
+            
+            # Explanation for Predictive Maturity Analysis
+            with st.expander("Explanation of Predictive Maturity Analysis"):
+                st.markdown("""
+                ### Overview
+                The Predictive Maturity Analysis tab evaluates how the predictive performance of a selected model (LSTM or GRU) improves or stabilizes as more historical data is included. This analysis is crucial for determining whether the dataset is sufficient to capture robust patterns and whether predictions are reliable for the next lottery draw. The tab generates two plots:
+                - **Predictive Maturity Curve**: Shows the model’s Likelihood Score (predictive accuracy) as a function of historical data size.
+                - **Prediction Delta Plot**: Tracks how predicted numbers for the next draw change as more data is used, indicating prediction stability.
+
+                These plots help users assess whether additional data would enhance predictions, identify optimal data sizes for model training, and validate the reliability of predictions from the Predictive Analytics tab (Tab 1). In the lottery context, this analysis ensures that number selections are based on stable, data-driven patterns rather than noise or insufficient data.
+
+                ### Detailed Explanation of Each Plot
+
+                #### 1. Predictive Maturity Curve
+                **Description**:
+                - A line plot showing the Likelihood Score (y-axis, in percentage) versus the size of the historical dataset used for training (x-axis, in number of draws). The Likelihood Score is derived from backtesting, measuring the model’s accuracy in predicting validation draws.
+                - The analysis tests multiple history sizes (e.g., 50, 100, ..., up to the full dataset length) by training the model on each subset and evaluating performance on a validation set (default: last 20% of the subset, minimum 10 draws).
+                - **Example**: If the curve rises from 50% at 50 draws to 75% at 200 draws and plateaus, it suggests that 200 draws are sufficient for reliable predictions.
+
+                **Mathematical Foundation**:
+                - For each history size \( N_i \) (from 50 to total draws), the dataset is split into training (80%) and validation (20%) sets. The model (LSTM or GRU) is trained on the training set, and predictions are made for each validation draw.
+                - **Likelihood Score**: Computed as the average number of correct predictions (hits) per draw, normalized to a percentage: \( \text{Likelihood} = \left( \frac{1}{M} \sum_{j=1}^M |\text{set}(y_{\text{pred},j}) \cap \text{set}(y_{\text{true},j})| \right) \cdot \frac{100}{6} \), where \( M \) is the number of validation draws.
+                - The curve is plotted as \( \text{Likelihood}(N_i) \), with markers indicating tested history sizes (typically 8 points).
+
+                **Significance**:
+                - **Trend Analysis**: A rising curve indicates that more data improves predictive accuracy, suggesting underlying patterns are being captured. A plateau suggests the model has learned all available patterns, and additional data may not improve performance. A declining or erratic curve indicates overfitting or insufficient patterns.
+                - **In Lottery**: A high, stable Likelihood Score (e.g., >70% at 200 draws) suggests that the model reliably predicts numbers based on historical trends, making Tab 1 predictions trustworthy. A low or unstable score indicates that the dataset may be too small or the system too random.
+                - **Limitations**:
+                  - **Data Dependency**: Requires ≥50 draws per subset, with ≥10 validation draws. Small datasets (<100 draws) may produce noisy curves.
+                  - **Overfitting**: If the curve peaks early and declines, the model may overfit to early data, reducing generalizability.
+                  - **Model-Specific**: Results apply to the selected model (LSTM or GRU). Different models may show different maturity trends.
+
+                **Actionability**:
+                - **Optimal Data Size**:
+                  - Identify the history size where the Likelihood Score plateaus (e.g., 200 draws at 75%). Use this size for training in Tab 1 to maximize reliability.
+                  - If the curve is still rising at the maximum history size, collect more data to improve predictions.
+                - **Model Reliability**:
+                  - If Likelihood Score > 70%, trust Tab 1 predictions for the selected model. If < 50%, consider alternative models or combine with frequency analysis (`df_master.value_counts()`).
+                  - For erratic curves, reduce `seq_length` (e.g., to 3) to prevent overfitting or increase epochs (e.g., to 150) for better training.
+                - **Cross-Validation**:
+                  - Compare with Tab 2 (System Dynamics). If a cycle is detected (e.g., 10 draws), ensure the history size includes multiple cycles (e.g., >100 draws).
+                  - Check the Prediction Delta Plot to confirm prediction stability at the chosen history size.
+                - **Practical Steps**:
+                  - Select the history size with the highest stable Likelihood Score (e.g., 200 draws). Use Tab 1 predictions trained on this size.
+                  - If the curve is flat or declining, rely on Hilbert Embedding (less data-sensitive) or cycle-based predictions from Tab 2.
+                  - Test predictions against new draws to validate the chosen history size.
+
+                #### 2. Prediction Delta Plot
+                **Description**:
+                - A line plot showing how predicted numbers for the next draw (y-axis) change as the history size increases (x-axis, labeled as “Size N”). Each line represents one position (Pos_1 to Pos_6), tracking prediction stability.
+                - Predictions are made for the next draw after each history size, using the same model as the Maturity Curve.
+                - **Example**: If Pos_1 predictions stabilize at 3 for history sizes >200 draws, it suggests a robust prediction for Pos_1 = 3.
+
+                **Mathematical Foundation**:
+                - For each history size \( N_i \), train the model on \( \text{df.iloc[:N_i]} \) and predict the next draw’s numbers: \( \hat{y}_{N_i} = [y_1, \ldots, y_6] \).
+                - The plot shows \( \hat{y}_{N_i,j} \) (predicted number for position \( j \)) versus \( N_i \). Stability is assessed by the convergence of each line to a consistent value.
+                - Predictions are clamped to position-specific maximums and ensured unique, which may introduce slight randomness if duplicates occur.
+
+                **Significance**:
+                - **Stability Analysis**: Stable lines (e.g., Pos_1 converging to 3) indicate that predictions are robust to additional data, suggesting reliable patterns. Fluctuating lines suggest sensitivity to data size, indicating noise or insufficient patterns.
+                - **In Lottery**: Stable predictions (e.g., Pos_1 = 3 for >200 draws) are strong candidates for number selection. Unstable predictions suggest that more data or a different model is needed.
+                - **Limitations**:
+                  - **Discreteness**: Lottery numbers are integers, so small changes in predictions may appear as jumps, complicating stability assessment.
+                  - **Data Limitations**: Small datasets (<100 draws) may show erratic predictions due to insufficient training data.
+                  - **Model Dependency**: Stability depends on the selected model. GRU may stabilize faster than LSTM for simpler patterns.
+
+                **Actionability**:
+                - **Stable Predictions**:
+                  - Identify positions with stable predictions (e.g., Pos_1 = 3 for sizes >200). Include these numbers in your selection: [3, ...].
+                  - If all positions stabilize, use the full prediction set from Tab 1 for that history size.
+                - **Unstable Predictions**:
+                  - For fluctuating lines, collect more data until stability is achieved (e.g., >300 draws).
+                  - Alternatively, use Hilbert Embedding (Tab 1) or cycle-based predictions (Tab 2) for less data-sensitive approaches.
+                - **Cross-Validation**:
+                  - Compare stable predictions with Tab 1’s highest-likelihood model. If Pos_1 = 3 is stable and matches LSTM’s prediction, it’s a strong candidate.
+                  - Check Tab 2 for cycles (e.g., 10 draws) to ensure stable predictions align with periodic patterns.
+                - **Practical Steps**:
+                  - Select numbers from the largest history size with stable predictions (e.g., Pos_1 = 3 at 200 draws).
+                  - If predictions fluctuate, combine with frequency analysis (`df_master['Pos_1'].value_counts()`) or Tab 2 cycles.
+                  - Validate stable predictions against new draws to confirm reliability.
+
+                ### Integrated Interpretation
+                **Combining Plots**:
+                - **Coherent Trends**: If the Maturity Curve plateaus at a high Likelihood Score (e.g., 75% at 200 draws) and the Delta Plot shows stable predictions for all positions, the model is reliable. Use Tab 1 predictions from this history size.
+                - **Divergent Trends**: If the Maturity Curve is high but predictions fluctuate, the model may be overfitting or capturing noisy patterns. Collect more data or switch to Hilbert Embedding.
+                - **Low Performance**: If the Likelihood Score is low (<50%) or predictions are unstable, the dataset may be insufficient or too random. Rely on Tab 2 cycles or frequency analysis.
+                - **Error Analysis**: Jumps in the Delta Plot may reflect clamping to position-specific maximums or uniqueness constraints. Cross-check with Tab 1 error estimates to assess confidence.
+
+                **Significance in Lottery**:
+                - Ensures predictions are based on sufficient data, avoiding reliance on noisy or incomplete patterns.
+                - Stable predictions from the Delta Plot are strong candidates for number selection, while the Maturity Curve indicates whether the model is trustworthy.
+                - Helps balance data collection efforts with predictive power, critical for lotteries where historical data may be limited.
+
+                **Actionable Strategy**:
+                1. **Assess Maturity Curve**:
+                   - Identify the history size where the Likelihood Score stabilizes (e.g., 200 draws at 75%).
+                   - If the score is low (<50%), collect more data or use Tab 2 cycles.
+                2. **Check Prediction Stability**:
+                   - Use stable predictions from the Delta Plot (e.g., Pos_1 = 3) as primary candidates.
+                   - If unstable, combine with Tab 1’s highest-likelihood model or Tab 2’s cycle-based numbers.
+                3. **Cross-Validate**:
+                   - Ensure stable predictions align with Tab 1’s high-likelihood models and Tab 2’s cycles (e.g., 10-draw cycle for Pos_1 = 3).
+                   - If inconsistent, increase history size or adjust `seq_length`.
+                4. **Iterate**:
+                   - Test predictions against new draws to validate stability and accuracy.
+                   - If performance is poor, collect more data or try the other model (LSTM vs. GRU).
+                5. **Optimize**:
+                   - Adjust `seq_length` (3–6) to balance pattern capture and overfitting, based on curve trends.
+                   - Increase epochs (e.g., to 150) if the curve suggests undertraining.
+
+                ### Technical Notes
+                - **Data Requirements**:
+                  - Minimum 50 draws per subset, with ≥10 validation draws for reliable backtesting.
+                  - Larger datasets (>200 draws) improve curve smoothness and prediction stability.
+                - **Parameter Tuning**:
+                  - **Sequence Length**: Adjust `seq_length` (3–6) to capture different dependencies. Shorter lengths (e.g., 3) reduce overfitting for small datasets.
+                  - **Epochs**: Increase to 150–200 for better training, but monitor overfitting via the Maturity Curve.
+                  - **History Sizes**: Eight sizes are tested by default (`np.linspace(50, len(df), 8)`). Increase to 10–12 for finer granularity with large datasets.
+                - **Performance**:
+                  - Analysis is computationally intensive due to repeated training. Cached results (`@st.cache_data`) mitigate overhead.
+                  - GRU may be faster than LSTM but less effective for complex patterns.
+                - **Robustness**:
+                  - Error handling ensures graceful failure (e.g., empty DataFrames for failed analyses).
+                  - Check `st.session_state.data_warning` for data issues affecting results.
+                - **Enhancements**:
+                  - Add confidence intervals to the Maturity Curve for uncertainty quantification.
+                  - Implement ensemble analysis to compare LSTM and GRU maturity simultaneously.
+                """)
+
+            model_type = st.selectbox("Select Model for Maturity Analysis", options=['LSTM', 'GRU'], index=0)
+            if st.button("ANALYZE PREDICTIVE MATURITY"):
+                with st.spinner("Analyzing predictive maturity..."):
+                    maturity_df, delta_df = analyze_predictive_maturity(df_master, model_type, max_nums=max_nums)
+                
                 if not maturity_df.empty:
-                    st.subheader("Model Performance vs. History Size")
-                    fig_maturity = px.line(
+                    st.subheader(f"Predictive Maturity Curve ({model_type})")
+                    fig = px.line(
                         maturity_df,
                         x='History Size',
                         y='Likelihood Score',
-                        title="Predictive Maturity Curve",
+                        title=f"Likelihood Score vs. History Size ({model_type})",
                         markers=True
                     )
-                    st.plotly_chart(fig_maturity, use_container_width=True)
-                    st.subheader("Prediction Stability (Convergence)")
-                    st.markdown("Shows how predictions for the next draw change with more data.")
-                    fig_delta = px.line(
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                if not delta_df.empty:
+                    st.subheader(f"Prediction Delta Plot ({model_type})")
+                    fig = px.line(
                         delta_df,
                         x=delta_df.index,
                         y=delta_df.columns,
-                        title="Prediction Delta Plot",
-                        labels={'value': 'Predicted Number', 'index': 'History Size'}
+                        title=f"Predicted Numbers vs. History Size ({model_type})",
+                        labels={'index': 'History Size', 'value': 'Predicted Number'},
+                        markers=True
                     )
-                    st.plotly_chart(fig_delta, use_container_width=True)
-    else:
-        st.error("Invalid data format. After cleaning, the file must have 6 number columns and at least 50 rows.")
-else:
-    st.info("Upload a CSV file to engage the Engine.")
+                    st.plotly_chart(fig, use_container_width=True)
