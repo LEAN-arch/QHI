@@ -1,10 +1,10 @@
 # ======================================================================================================
-# LottoSphere v16.0.3: The Quantum Chronodynamics Engine
+# LottoSphere v16.0.4: The Quantum Chronodynamics Engine
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-25
-# VERSION: 16.0.3 (Debugged, Optimized with Periodicity Analysis, Position-Specific Max Numbers,
-#                  and Detailed Explanation in UI)
+# VERSION: 16.0.4 (Debugged, Optimized with Periodicity Analysis, Position-Specific Max Numbers,
+#                  and Substantially Expanded Explanation in UI)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -12,8 +12,9 @@
 # independent yet interacting dynamical system. Integrates deep learning, statistical physics,
 # chaos theory, and quantum-inspired methods with a robust metrology suite.
 # Enhanced with periodicity analysis for non-positive Lyapunov exponents, position-specific
-# maximum numbers based on sequence length (3 to 6), and a detailed explanation of results
-# and plots in the System Dynamics Explorer tab.
+# maximum numbers based on sequence length (3 to 6), and a substantially expanded explanation
+# of results and plots in the System Dynamics Explorer tab, providing deeper mathematical,
+# technical, and actionable insights.
 # ======================================================================================================
 
 import streamlit as st
@@ -49,7 +50,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.3: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.4: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -507,7 +508,7 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.3: The Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.4: The Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical and AI techniques.")
 
 if 'data_warning' not in st.session_state:
@@ -575,123 +576,213 @@ if uploaded_file:
             st.header("System Dynamics Explorer")
             st.markdown("Explore the intrinsic, time-dependent behavior of the number system.")
             
-            # Add detailed explanation of results and plots
+            # Add expanded explanation of results and plots
             with st.expander("Explanation of Results and Plots"):
                 st.markdown("""
                 ### Overview
-                The System Dynamics Explorer analyzes the temporal behavior of a selected position (e.g., Pos_1, the smallest number in each draw) as a dynamical system. It provides insights into whether the time series is chaotic, stable, or periodic, which is critical for understanding the underlying dynamics of the lottery system. The analysis includes four main outputs:
+                The System Dynamics Explorer analyzes the temporal behavior of a selected position (e.g., Pos_1, the smallest number in each sorted draw) as a dynamical system, leveraging principles from chaos theory, statistical physics, and time-series analysis. This module treats each position as an independent yet interacting component of a high-dimensional system, aiming to uncover patterns, cycles, or chaotic behavior in lottery number sequences. By modeling the sequence of numbers as a time series, it provides insights into whether the system is predictable (stable or periodic) or inherently unpredictable (chaotic), which is critical for developing informed number selection strategies or guiding further analytical efforts.
 
-                - **Recurrence Plot**: Visualizes when the time series revisits similar states.
-                - **Power Spectral Density (Fourier Analysis)**: Identifies dominant frequencies (cycles) in the time series.
-                - **Continuous Wavelet Transform**: Reveals how frequencies evolve over time.
-                - **Lyapunov Exponent and Periodicity Analysis**: Quantifies chaos (or stability) and detects periodic cycles when the system is stable or periodic.
+                The analysis produces four main outputs, each offering a unique perspective on the system’s dynamics:
+                - **Recurrence Plot**: Visualizes when the time series revisits similar states, revealing repetitive patterns or chaotic scattering.
+                - **Power Spectral Density (Fourier Analysis)**: Identifies dominant periodic components (cycles) in the time series, quantifying their strength.
+                - **Continuous Wavelet Transform**: Maps how periodic patterns evolve over time, capturing non-stationary behavior.
+                - **Lyapunov Exponent and Periodicity Analysis**: Quantifies the degree of chaos (or stability) and detects specific cycle lengths when the system is stable or periodic.
 
-                These outputs help assess whether the position’s numbers are predictable, cyclic, or chaotic, informing strategies for number selection or further analysis.
+                These outputs collectively enable users to assess the predictability of the selected position’s numbers, distinguish between random and structured behavior, and develop actionable strategies for number selection. In the context of lotteries, where numbers are often assumed to be random, positional analysis (due to sorting) may reveal subtle patterns influenced by game mechanics or historical trends.
 
                 ### Detailed Explanation of Each Result
 
                 #### 1. Recurrence Plot
                 **Description**:
-                - A square heatmap where each point \([i, j]\) shows the absolute difference between the values at draws \(i\) and \(j\), normalized to [0, 1]. Darker colors indicate similar values (recurrence of states), while lighter colors show dissimilar states.
-                - **Example**: For 1000 draws, a 1000x1000 heatmap with dark diagonal lines suggests repeated patterns.
+                - The recurrence plot is a square matrix where each element \([i, j]\) represents the absolute difference between the time series values at draws \(i\) and \(j\), normalized to the range [0, 1]. Mathematically, for a time series \(x(t)\), the recurrence matrix is defined as \( R_{i,j} = |x_i - x_j| / \max(|x_i - x_j|) \), where \(x_i\) is the value at draw \(i\). Darker colors indicate smaller differences (similar states, or recurrences), while lighter colors indicate larger differences (dissimilar states).
+                - The plot is visualized as a heatmap using a `viridis` color scale, with both axes representing draw indices (e.g., 0 to 999 for 1000 draws).
+                - **Example**: For a time series of Pos_1 with 1000 draws, a 1000x1000 heatmap with dark diagonal lines every 10 draws suggests that similar numbers (e.g., Pos_1 = 3) reappear approximately every 10 draws.
+
+                **Mathematical Foundation**:
+                - Recurrence plots are rooted in state-space reconstruction, a technique from dynamical systems theory. The time series is embedded in a higher-dimensional space to capture its dynamics, but here, a simplified distance-based approach is used for computational efficiency.
+                - The plot approximates the recurrence of states in the phase space, where \( R_{i,j} \approx 0 \) indicates that the system’s state at time \(i\) is close to its state at time \(j\).
+                - Patterns in the plot reflect the system’s determinism: periodic systems show regular structures (e.g., diagonal lines), while chaotic systems exhibit scattered or noisy patterns.
 
                 **Significance**:
-                - **Patterns**: Diagonal lines parallel to the main diagonal (where \(i = j\)) indicate periodic behavior, as the same numbers reappear at regular intervals. A checkerboard pattern suggests quasi-periodicity, while a noisy plot indicates chaotic or random behavior.
-                - **In Lottery**: Reveals whether numbers in the selected position (e.g., Pos_1 = 3) recur predictably. Long diagonal lines suggest a cycle, useful for anticipating reappearances.
-                - **Limitations**: Sensitive to noise in lottery data, which may obscure patterns. Requires sufficient data (≥50 draws) for meaningful recurrences.
+                - **Patterns**: Diagonal lines parallel to the main diagonal (\(i = j\)) indicate periodic behavior, as the system returns to similar states at fixed intervals (e.g., every 10 draws). A checkerboard pattern suggests quasi-periodicity, where cycles vary slightly. A noisy, unstructured plot indicates chaotic or random behavior, with no consistent recurrences.
+                - **In Lottery**: For Pos_1, the plot reveals whether specific numbers (e.g., 3, 5, 7) recur predictably. For instance, if dark lines appear every 10 draws, Pos_1 may cycle through a set of numbers, suggesting a periodic structure exploitable for predictions.
+                - **Limitations**:
+                  - **Noise Sensitivity**: Lottery data often contains random fluctuations, which can obscure patterns, especially in short datasets (<100 draws).
+                  - **Data Requirements**: Requires at least 50 draws (enforced by `load_data`) to capture meaningful recurrences. Longer series (>500 draws) improve pattern clarity.
+                  - **Interpretation**: Patterns may be subtle, requiring cross-validation with other analyses (e.g., Periodicity Analysis) to confirm periodicity.
 
                 **Actionability**:
-                - **Periodic Behavior**: If diagonal lines appear every 10 draws, hypothesize a 10-draw cycle. Prioritize numbers that appeared 10 draws ago for Pos_1.
-                - **Chaotic Behavior**: A noisy plot suggests unpredictability. Rely on Predictive Analytics (Tab 1) models like LSTM/GRU instead of cycle-based strategies.
-                - **Next Steps**: Confirm cycles with Periodicity Analysis. Collect more data if patterns are unclear.
+                - **Periodic Behavior**: If diagonal lines appear every 10 draws, hypothesize a 10-draw cycle. For example, if Pos_1 was 5 ten draws ago, prioritize 5 for the next prediction. Review recent draws to identify numbers within the cycle.
+                - **Quasi-Periodic Behavior**: A checkerboard pattern suggests variable cycles. Consider a range of lags (e.g., 8–12 draws) and select numbers that appeared in those draws.
+                - **Chaotic Behavior**: A noisy plot with no clear structure indicates unpredictability. Shift focus to the Predictive Analytics tab (Tab 1), where LSTM, GRU, or Hilbert Embedding models can capture complex, non-linear patterns.
+                - **Practical Steps**:
+                  - Extract cycle length from diagonal line spacing (e.g., 10 draws).
+                  - Use `df_master['Pos_1'].iloc[-10]` to check the number 10 draws ago and include it in your prediction set.
+                  - If patterns are unclear, collect more historical draws (e.g., >1000) to enhance recurrence visibility or adjust the normalization factor in the code for finer resolution.
+                - **Cross-Validation**: Confirm cycle lengths with Periodicity Analysis (ACF) and Fourier Analysis. If inconsistent, the system may be chaotic or data-limited.
 
                 #### 2. Power Spectral Density (Fourier Analysis)
                 **Description**:
-                - A line plot showing the power (strength) of different frequencies in the time series. The x-axis is frequency (cycles per draw), and the y-axis is power. Peaks indicate dominant cycles.
-                - **Example**: A peak at 0.1 cycles/draw suggests a cycle every \(1/0.1 = 10\) draws.
+                - The Power Spectral Density (PSD) plot estimates the power (strength) of periodic components in the time series across different frequencies, computed using Welch’s method. The x-axis represents frequency in cycles per draw (e.g., 0.1 cycles/draw), and the y-axis shows power (amplitude squared of the frequency component). Peaks indicate dominant cycles.
+                - Welch’s method divides the time series into overlapping segments, applies a Fourier transform to each, and averages the results to reduce noise, with segment length set to `min(len(series), 256)` draws.
+                - **Example**: A peak at 0.1 cycles/draw corresponds to a period of \(1/0.1 = 10\) draws, suggesting Pos_1 numbers may repeat every 10 draws.
+
+                **Mathematical Foundation**:
+                - The PSD is computed as \( P(f) = \frac{1}{N} |\sum_{t=0}^{N-1} x(t) e^{-i2\pi ft}|^2 \), averaged over segments, where \(x(t)\) is the time series, \(f\) is frequency, and \(N\) is the segment length.
+                - Frequency \(f\) in cycles/draw relates to period \(T\) via \(T = 1/f\). For example, \(f = 0.05\) implies \(T = 20\) draws.
+                - Welch’s method improves robustness by reducing variance through overlapping windows, but assumes local stationarity within segments.
 
                 **Significance**:
-                - **Frequencies**: Peaks show cycle lengths. A peak at 0.05 cycles/draw means a 20-draw cycle, suggesting Pos_1 numbers may repeat every 20 draws.
-                - **In Lottery**: Helps identify cyclic patterns for number selection based on cycle timing.
-                - **Limitations**: Assumes stationarity, which lottery data may violate due to randomness. Short datasets (<100 draws) may produce noisy results.
+                - **Frequencies**: Peaks in the PSD indicate dominant periodic components. A strong peak at 0.05 cycles/draw suggests a 20-draw cycle, meaning Pos_1 numbers (e.g., 5, 7) may recur every 20 draws.
+                - **In Lottery**: Identifies cycle lengths that can guide number selection. For example, a 10-draw cycle suggests selecting numbers from 10 draws ago, as they may reappear.
+                - **Limitations**:
+                  - **Stationarity Assumption**: Assumes consistent statistical properties, which lottery data may violate due to randomness or external factors (e.g., rule changes).
+                  - **Short Datasets**: With <100 draws, PSD peaks may be noisy or unreliable due to limited frequency resolution.
+                  - **Resolution**: The segment length (`nperseg=256`) limits the ability to detect long cycles (>256 draws) unless the dataset is sufficiently large.
 
                 **Actionability**:
-                - **Cycle Detection**: Note the top 2–3 peaks and compute periods (period = \(1/\text{frequency}\)). For a peak at 0.1, expect a 10-draw cycle. Select numbers from 10 draws ago.
-                - **Validation**: Compare with Periodicity Analysis and Wavelet Transform. If no peaks, rely on Tab 1 models.
-                - **Next Steps**: Analyze recent draws to align predictions with the cycle. Adjust analysis parameters (e.g., increase frequency resolution) for clearer peaks if data allows.
+                - **Cycle Detection**:
+                  - Identify the top 2–3 peaks in the PSD plot. Compute periods as \(T = 1/f\). For a peak at 0.1 cycles/draw, expect a 10-draw cycle.
+                  - For Pos_1, check `df_master['Pos_1'].iloc[-T]` to select candidate numbers (e.g., if Pos_1 was 3 ten draws ago, include 3).
+                - **Validation**:
+                  - Compare PSD periods with Periodicity Analysis (ACF) and Wavelet Transform bands to confirm cycle consistency.
+                  - If no clear peaks appear, the system may be non-periodic or data-limited, suggesting reliance on Tab 1 models (LSTM/GRU).
+                - **Practical Steps**:
+                  - For a 10-draw cycle, review the last 10 draws for Pos_1 and prioritize recurring numbers.
+                  - If multiple peaks exist (e.g., at 0.1 and 0.2 cycles/draw), test predictions for both 10- and 5-draw cycles to diversify candidates.
+                  - If peaks are weak, increase `nperseg` (e.g., to 512) in `analyze_temporal_behavior` for finer resolution, provided the dataset has >512 draws.
+                - **Optimization**:
+                  - For large datasets, adjust `nperseg` to balance resolution and computation time (e.g., `nperseg=len(series)//2`).
+                  - If results are noisy, apply a smoothing filter (e.g., moving average) to the time series before analysis, though this requires code modification.
 
                 #### 3. Continuous Wavelet Transform
                 **Description**:
-                - A heatmap showing time-frequency patterns. The x-axis is time (draw indices), the y-axis is scale (inversely related to frequency), and color intensity shows the strength of periodic signals.
-                - **Example**: A bright band at scale 10 around draw 500 indicates a strong 10-draw cycle at that time.
+                - The Continuous Wavelet Transform (CWT) decomposes the time series into time-frequency components using a Morlet wavelet, which balances time and frequency resolution. The x-axis represents time (draw indices), the y-axis represents scales (inversely related to frequency), and color intensity reflects the amplitude of wavelet coefficients.
+                - Scales are set to `np.arange(1, min(31, len(series)//2))`, limiting analysis to short-to-medium cycles due to computational constraints.
+                - **Example**: A bright band at scale 10 around draw 500 indicates a strong periodic signal with a period of approximately 10 draws at that time.
+
+                **Mathematical Foundation**:
+                - The CWT is defined as \( W(s, t) = \int x(\tau) \psi^*((t - \tau)/s) d\tau \), where \(x(t)\) is the time series, \(\psi\) is the Morlet wavelet, \(s\) is the scale, and \(t\) is time.
+                - The Morlet wavelet, \(\psi(t) = \pi^{-1/4} e^{i\omega_0 t} e^{-t^2/2}\), is a complex wave modulated by a Gaussian, with \(\omega_0 = 6\) for balance between time and frequency localization.
+                - Scale \(s\) relates to period via \( T \approx s \cdot \delta t \), where \(\delta t\) is the sampling interval (1 draw). For lottery data, \( T \approx s \).
 
                 **Significance**:
-                - **Time-Frequency Insight**: Unlike Fourier, it captures non-stationary behavior, showing when cycles appear or vanish.
-                - **In Lottery**: Bright bands indicate periods when Pos_1 numbers recur cyclically, guiding predictions based on active cycles.
-                - **Limitations**: Computationally intensive for large datasets (>1000 draws). Noisy for short series. Assumes smooth oscillations, which may miss abrupt changes.
+                - **Time-Frequency Insight**: Unlike Fourier analysis, CWT captures non-stationary behavior, showing when cycles emerge, persist, or vanish. For example, a bright band at scale 10 from draws 200–300 indicates a 10-draw cycle active in that window.
+                - **In Lottery**: Identifies periods when Pos_1 numbers follow cyclic patterns, enabling time-specific predictions. For instance, if a cycle is active in recent draws, numbers from the corresponding lag are strong candidates.
+                - **Limitations**:
+                  - **Computational Cost**: CWT is intensive for large datasets (>1000 draws), as the complexity scales with series length and number of scales.
+                  - **Short Series**: With <100 draws, results may be noisy, missing long cycles.
+                  - **Wavelet Choice**: The Morlet wavelet assumes smooth oscillations, potentially missing abrupt changes in lottery data.
 
                 **Actionability**:
-                - **Cycle Timing**: Identify bright bands and their scales (e.g., scale 10 ≈ 10 draws). If recent draws are in a bright region, prioritize numbers from recent cycles.
-                - **Dynamic Adjustments**: Focus on recent data if cycles are time-specific (e.g., draws 200–300).
-                - **Next Steps**: Correlate with Fourier and Periodicity Analysis. Adjust scale range for faster computation if needed.
+                - **Cycle Timing**:
+                  - Identify bright bands and their scales (e.g., scale 10 ≈ 10 draws). If a band appears in recent draws (e.g., last 50 draws), prioritize numbers from the corresponding lag (e.g., `df_master['Pos_1'].iloc[-10]`).
+                  - For example, if Pos_1 = 7 ten draws ago and a band is active at scale 10, include 7 in predictions.
+                - **Dynamic Adjustments**:
+                  - If cycles are time-specific (e.g., draws 200–300), focus on recent data for predictions, as older cycles may no longer apply.
+                  - If no bands appear, the system may lack strong periodicity, suggesting reliance on Tab 1 models.
+                - **Practical Steps**:
+                  - Cross-check scale-based periods with PSD and ACF results. For a scale 10 band, confirm a PSD peak at 0.1 cycles/draw or an ACF peak at lag 10.
+                  - If results are noisy, reduce the scale range (e.g., `widths=np.arange(1, 16)`) to focus on shorter cycles or increase dataset size.
+                - **Optimization**:
+                  - For large datasets, limit `widths` to 1–15 to reduce computation time without losing short-cycle detection.
+                  - Consider alternative wavelets (e.g., Mexican Hat) for sharper transitions, though this requires code changes.
 
                 #### 4. Lyapunov Exponent and Periodicity Analysis
                 **Description**:
-                - **Lyapunov Exponent**: Measures chaos. Positive values indicate chaotic behavior (sensitivity to initial conditions); non-positive (≤0) suggest stability or periodicity.
-                - **Periodicity Analysis**: For non-positive Lyapunov, an autocorrelation function (ACF) plot shows correlations at different lags. Peaks above 0.2 indicate periods (e.g., a peak at lag 8 suggests an 8-draw cycle).
-                - **Example**: Lyapunov = -0.0123 (stable), ACF peak at lag 8 with description: “Periodicity with a dominant period of approximately 8 draws.”
+                - **Lyapunov Exponent**: Quantifies the rate of divergence of nearby trajectories in the time series, computed using Rosenstein’s algorithm (`nolds.lyap_r`) with an embedding dimension of 2. A positive exponent indicates chaotic behavior (exponential divergence), while a non-positive exponent (≤0) suggests stability or periodicity.
+                - **Periodicity Analysis**: For non-positive Lyapunov exponents, the autocorrelation function (ACF) is computed to detect periodic patterns. The ACF measures correlation between the time series and its lagged versions, with lags up to `min(50, len(series)//2)`. Peaks above a threshold (0.2) indicate potential periods.
+                - **Example**:
+                  - Lyapunov = -0.0123 (stable), ACF peak at lag 8, with description: “The system exhibits potential periodicity with a dominant period of approximately 8 draws.”
+                  - ACF plot: A line graph with x-axis as lags (0–50), y-axis as autocorrelation (-1 to 1), and red dashed lines at ±0.2 indicating significance.
+
+                **Mathematical Foundation**:
+                - **Lyapunov Exponent**: For a time series \(x(t)\), the largest Lyapunov exponent \(\lambda\) is estimated as the average divergence rate: \( d(t) \approx d_0 e^{\lambda t} \), where \(d(t)\) is the distance between nearby trajectories. The algorithm reconstructs the state space with embedding dimension 2, tracking divergence over time.
+                - **ACF**: The autocorrelation at lag \(k\) is \( \rho(k) = \frac{\sum_{t=1}^{N-k} (x_t - \bar{x})(x_{t+k} - \bar{x})}{\sum_{t=1}^N (x_t - \bar{x})^2} \), where \(\bar{x}\) is the mean. Peaks above 0.2 indicate significant periodicity at lag \(k\).
+                - The FFT-based ACF computation (`fft=True`) ensures efficiency for large datasets.
 
                 **Significance**:
-                - **Lyapunov**:
-                  - **Positive**: Chaotic system, unpredictable. Use robust models (Tab 1).
-                  - **Non-positive**: Stable or periodic, allowing cycle-based predictions.
-                - **Periodicity**:
-                  - A peak at lag 8 indicates an 8-draw cycle for Pos_1 numbers.
-                  - No peaks suggest stability without clear cycles.
-                - **In Lottery**: A stable system with a period (e.g., 8 draws) enables predictions based on cycle timing. Chaotic systems require diversified models.
+                - **Lyapunov Exponent**:
+                  - **Positive (\(\lambda > 0\))**: Indicates chaos, where small changes in initial conditions lead to large prediction errors. For Pos_1, this suggests numbers are highly unpredictable, requiring robust models like LSTM/GRU.
+                  - **Non-positive (\(\lambda \leq 0\))**: Suggests a stable or periodic system, where patterns may repeat predictably, enabling cycle-based predictions.
+                - **Periodicity Analysis**:
+                  - A peak at lag 8 indicates an 8-draw cycle, meaning Pos_1 numbers (e.g., 5) may repeat every 8 draws.
+                  - No significant peaks suggest stability without clear cycles, implying a steady but non-repeating pattern.
+                - **In Lottery**: A non-positive Lyapunov with a clear period (e.g., 8 draws) allows predictions based on historical values at that lag. Chaotic systems require diversified, model-based approaches.
 
                 **Actionability**:
-                - **Chaotic (Positive Lyapunov)**:
-                  - Avoid cycle-based predictions. Use Tab 1 (LSTM/GRU/Hilbert) for robust forecasts.
-                  - Next: Focus on Predictive Analytics.
-                - **Stable/Periodic (Non-positive Lyapunov)**:
-                  - If period detected (e.g., 8 draws), select Pos_1 numbers from 8 draws ago. If Pos_1 was 5 then, consider 5.
-                  - No period: Use frequency analysis (e.g., most common Pos_1 numbers).
-                  - Next: Confirm period with Fourier/Wavelet. Test cycle-based predictions in Tab 1.
-                - **ACF Plot**:
-                  - Peaks above red lines (0.2) indicate periodicity. Use lag (e.g., 8) to predict based on past draws.
-                  - No peaks: Rely on other analyses or Tab 1.
-                - **Limitations**: Lyapunov is noise-sensitive; ACF assumes stationarity. Use multiple analyses for confirmation.
+                - **Chaotic System (Positive Lyapunov)**:
+                  - **Action**: Avoid cycle-based predictions due to sensitivity to initial conditions. Use Tab 1 models (LSTM, GRU, Hilbert Embedding) for robust forecasts, as they capture non-linear patterns.
+                  - **Practical Steps**: Run the Predictive Analytics tab and select the highest-likelihood model (based on backtesting scores).
+                  - **Next Steps**: Focus on Tab 1 results and monitor prediction accuracy in Tab 3 (Predictive Maturity) to assess model reliability.
+                - **Stable/Periodic System (Non-positive Lyapunov)**:
+                  - **If Period Detected**:
+                    - For an ACF peak at lag 8, check `df_master['Pos_1'].iloc[-8]` (e.g., if Pos_1 = 5, consider 5 for the next draw).
+                    - Build a candidate set from numbers at lags 8, 16, 24, etc., to capture the cycle.
+                  - **No Period**:
+                    - Perform frequency analysis: `df_master['Pos_1'].value_counts()` to identify the most common numbers (e.g., if 3 appears most often, prioritize 3).
+                    - Combine with Tab 1 predictions for a diversified approach.
+                  - **Practical Steps**:
+                    - For a 10-draw cycle, review `df_master['Pos_1'].iloc[-10::10]` to extract recurring numbers.
+                    - If no periodicity, use historical frequencies or Tab 1 models.
+                - **ACF Plot Interpretation**:
+                  - Peaks above the red dashed line (0.2) indicate significant periodicity. Use the lag (e.g., 8) to select numbers from that draw.
+                  - Multiple peaks (e.g., at lags 8 and 16) suggest harmonics or multiple cycles; test both lags.
+                  - If peaks are below 0.2, the system is stable but non-periodic; rely on frequency analysis or Tab 1.
+                - **Validation**:
+                  - Confirm ACF periods with PSD (peak at \(1/\text{period}\)) and CWT (band at scale ≈ period).
+                  - If inconsistent, collect more data or adjust the ACF threshold (e.g., to 0.3 for stricter periodicity).
+                - **Limitations**:
+                  - **Lyapunov**: Sensitive to noise and short series (<100 draws), potentially yielding unreliable estimates. The embedding dimension (2) may be insufficient for complex dynamics.
+                  - **ACF**: Assumes stationarity, which lottery data may violate. Short lags (≤50) limit detection of long cycles.
+                  - **Mitigation**: Use multiple analyses (PSD, CWT) for confirmation. Increase data length or adjust parameters (e.g., `nlags=100`) for longer cycles.
 
                 ### Integrated Interpretation
                 **Combining Results**:
-                - **Coherent Patterns**: If Recurrence shows diagonal lines, Fourier shows a peak (e.g., 0.1 cycles/draw), Wavelet shows a band at scale 10, and Periodicity confirms a 10-draw cycle, Pos_1 is periodic. Predict based on 10-draw cycles.
-                - **Chaotic Signals**: Noisy Recurrence, flat Fourier, scattered Wavelet, and positive Lyapunov suggest chaos. Use Tab 1 models.
-                - **Mixed Signals**: Negative Lyapunov but no ACF peaks may indicate stability without periodicity or insufficient data. Collect more draws.
+                - **Coherent Patterns**: If the Recurrence Plot shows diagonal lines every 10 draws, PSD shows a peak at 0.1 cycles/draw, CWT shows a bright band at scale 10, and Periodicity Analysis (for non-positive Lyapunov) confirms a 10-draw cycle, Pos_1 is strongly periodic. This suggests a robust cycle for predictions, e.g., selecting numbers from 10 draws ago.
+                - **Chaotic Signals**: A noisy Recurrence Plot, flat PSD, scattered CWT, and positive Lyapunov indicate chaos. Predictions should rely on Tab 1 models, which are designed for complex, non-linear systems.
+                - **Mixed Signals**: A non-positive Lyapunov with no ACF peaks may indicate stability without periodicity, possibly due to insufficient data or weak cycles. A noisy Recurrence Plot with weak PSD/CWT signals suggests randomness or data limitations.
+                - **Error Analysis**: Discrepancies between analyses (e.g., PSD peak but no ACF peak) may arise from noise, non-stationarity, or short datasets. Collect more draws (>500) or adjust parameters (e.g., increase ACF lags, reduce CWT scales).
 
                 **Significance in Lottery**:
-                - Positional analysis (e.g., Pos_1) can reveal patterns due to sorting. This tab quantifies predictability, guiding cycle-based or model-based strategies.
+                - Lottery systems are often assumed to be random, but positional analysis (e.g., Pos_1 as the smallest number) can reveal patterns due to sorting constraints or game mechanics (e.g., maximum numbers per position). The System Dynamics Explorer quantifies these patterns, distinguishing between random, periodic, or chaotic behavior.
+                - Periodic systems enable cycle-based predictions, while chaotic systems require robust statistical or machine learning models. Stable but non-periodic systems suggest steady but unpredictable patterns, favoring frequency-based approaches.
 
                 **Actionable Strategy**:
-                1. **Check Lyapunov**:
-                   - Positive: Use Tab 1 predictions.
-                   - Non-positive: Proceed to Periodicity and cross-check with Fourier/Wavelet.
+                1. **Check Lyapunov Exponent**:
+                   - **Positive**: Indicates chaos. Use Tab 1 predictions (LSTM/GRU/Hilbert) and avoid cycle-based strategies.
+                   - **Non-positive**: Proceed to Periodicity Analysis, PSD, and CWT to explore cyclic or stable behavior.
                 2. **Analyze Periodicity**:
-                   - Use ACF to identify period (e.g., 8 draws). Select numbers from 8 draws ago.
-                   - No period: Prioritize frequent Pos_1 numbers.
+                   - If ACF shows a peak (e.g., lag 8), select Pos_1 numbers from 8 draws ago (e.g., `df_master['Pos_1'].iloc[-8]`).
+                   - If no peaks, compute frequency counts (`df_master['Pos_1'].value_counts()`) and prioritize common numbers.
                 3. **Cross-Validate**:
-                   - Confirm period with Fourier (peak at \(1/\text{period}\)) and Wavelet (band at scale ≈ period).
-                   - Check Recurrence for cycle consistency.
-                4. **Integrate**:
-                   - Combine cycle candidates with Tab 1 predictions.
-                   - Use Tab 3 to validate cycle reliability with more data.
-                5. **Iterate**:
-                   - Test predictions against new draws. Adjust strategy if cycles fail.
+                   - Confirm ACF periods with PSD (e.g., peak at 0.125 cycles/draw for 8 draws) and CWT (band at scale ≈ 8).
+                   - Check Recurrence Plot for diagonal lines matching the period.
+                   - If inconsistent, increase data length or adjust parameters (e.g., ACF threshold to 0.3, PSD `nperseg` to 512).
+                4. **Integrate with Predictions**:
+                   - Combine cycle-based candidates (e.g., numbers from 8 draws ago) with Tab 1 predictions to create a diversified set.
+                   - Use Tab 3 (Predictive Maturity) to assess whether more data improves cycle reliability or model performance.
+                5. **Iterate and Validate**:
+                   - Test cycle-based predictions against new draws. If accurate, continue using the cycle; if not, reassess with more data or shift to Tab 1 models.
+                   - Monitor Tab 3 for convergence in predictions, indicating robust cycles or model stability.
 
                 ### Technical Notes
-                - **Data**: Requires ≥50 draws. Longer series (>100) improve Periodicity reliability.
-                - **Parameters**: Adjust ACF threshold (0.2), Fourier resolution, or Wavelet scales if needed.
-                - **Performance**: Large datasets (>1000 draws) may slow Recurrence/Wavelet. Optimize by reducing scales or subsampling.
+                - **Data Requirements**:
+                  - Minimum 50 draws (enforced by `load_data`) for basic analysis. Longer series (>100 for ACF, >500 for PSD/CWT) improve reliability.
+                  - Short datasets (<100 draws) may yield noisy or inconclusive results, especially for Lyapunov and CWT.
+                - **Parameter Tuning**:
+                  - **ACF Threshold**: The 0.2 threshold balances sensitivity and specificity. Increase to 0.3 for stricter periodicity or decrease to 0.15 for weak signals, adjusting in `analyze_temporal_behavior`.
+                  - **PSD Resolution**: Increase `nperseg` (e.g., to 512) for finer frequency resolution if data length allows (>512 draws).
+                  - **CWT Scales**: Reduce `widths` (e.g., to 1–15) for faster computation or focus on short cycles. Increase for long datasets to detect longer periods.
+                - **Performance Optimization**:
+                  - Large datasets (>1000 draws) slow Recurrence Plots and CWT. Subsample data (e.g., every 2nd draw) or reduce `widths` to 1–15.
+                  - Cache results with `@st.cache_data` to avoid recomputation unless data or parameters change.
+                - **Robustness**:
+                  - Error handling ensures graceful failure (e.g., Lyapunov or ACF failures display warnings).
+                  - Check `st.session_state.data_warning` for data issues (e.g., invalid numbers, duplicates).
+                - **Enhancements**:
+                  - Add interactive plot controls (e.g., zoom, hover for values) by modifying Plotly configurations.
+                  - Implement alternative wavelets or higher embedding dimensions for Lyapunov analysis if needed, requiring code changes.
                 """)
 
             position = st.selectbox("Select Position", options=df_master.columns, index=0)
