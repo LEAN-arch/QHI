@@ -1,21 +1,40 @@
-# ===================================================================
-# Requirements for LottoSphere Prediction Engine v4.0
-#
-# To install all dependencies, run:
-# pip install -r requirements.txt
-# ===================================================================
+# --- Core & Data Handling ---
+streamlit
+pandas
+numpy
+scipy
 
-# --- Core Application Framework ---
-streamlit~=1.35.0
+# --- Machine Learning & Statistical Modeling ---
+scikit-learn
+statsmodels
+lightgbm
+xgboost
+prophet
+torch
 
-# --- Data Handling & Computation ---
-pandas~=2.2.0
-numpy~=1.26.0
-scikit-learn~=1.4.0  # For ML models, scaling, and metrics
+# --- Advanced Analysis & HPC ---
+umap-learn
+hdbscan
+shap>=0.41.0
+numba>=0.58.0
+networkx
 
-# --- Machine Learning ---
-# Note: Tensorflow can be a large package.
-tensorflow~=2.16.0
+# --- Simulation ---
+simpy
 
-# --- Visualization ---
-plotly~=5.20.0
+# --- Geospatial Analysis ---
+# Note: Installing geopandas can sometimes be tricky.
+# It's often best to use conda if you encounter issues with pip.
+# conda install -c conda-forge geopandas
+geopandas
+shapely
+folium
+streamlit-folium
+
+# --- Visualization & Reporting ---
+plotly
+matplotlib
+reportlab
+
+# --- Utility ---
+requests
