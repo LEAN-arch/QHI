@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 10.2.0 (Data Integrity & Finalization)
+# VERSION: 10.3.0 (Index Alignment Bug Fix)
 #
 # DESCRIPTION:
 # This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
@@ -15,11 +15,11 @@
 # historical accuracy, precision, and closeness) and provide uncertainty intervals for each
 # predicted number.
 #
-# VERSION 10.2.0 ENHANCEMENTS:
-# - CRITICAL FIX (ValueError): Resolved the fatal `ValueError: All arrays must be of the same length`.
-#   The root cause was malformed rows with duplicate numbers. The `load_data` function has been
-#   re-architected to robustly filter out any invalid draws, ensuring data integrity for all
-#   downstream models. This is the definitive fix for data-related crashes.
+# VERSION 10.3.0 ENHANCEMENTS:
+# - CRITICAL FIX (KeyError): Resolved the fatal `KeyError` during backtesting. The error was
+#   caused by an index mismatch between the original data and the feature-engineered DataFrame
+#   (which is one row shorter due to lag features). The backtesting logic for the ensemble
+#   model has been re-architected to ensure proper index alignment, making the process robust.
 # =================================================================================================
 
 import streamlit as st
@@ -65,20 +65,14 @@ def load_data(uploaded_file):
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df.dropna(inplace=True)
-    df = df.astype(int)
-
-    # --- CRITICAL FIX: Data Integrity Validation ---
-    # 1. For each row, count the number of unique values.
+    
     unique_counts = df.apply(lambda row: len(set(row)), axis=1)
-    # 2. Keep only the rows where the count of unique values is exactly 6.
     valid_rows_mask = (unique_counts == 6)
     
     if not valid_rows_mask.all():
         st.warning(f"Data integrity issue found. Discarded {len(df) - valid_rows_mask.sum()} rows with duplicate numbers.")
         df = df[valid_rows_mask]
 
-    # 3. Now that we have only valid rows, we can safely sort them.
-    # We create a new DataFrame from the sorted values.
     sorted_values = np.sort(df.values, axis=1)
     df = pd.DataFrame(sorted_values, columns=[f'Number {i+1}' for i in range(6)])
     
@@ -200,7 +194,6 @@ def predict_with_ensemble(df, models):
     error = (np.array(upper) - np.array(lower)) / 2.0
     
     return {'name': 'Ensemble AI (LightGBM)', 'prediction': prediction, 'error': error, 'logic': 'Quantile Regression on engineered features to predict the next draw with uncertainty bounds.'}
-
 # --- 5. BACKTESTING & SCORING ---
 @st.cache_data
 def backtest_and_score(df):
@@ -246,16 +239,25 @@ def backtest_and_score(df):
         final_pred_obj['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
         scored_predictions.append(final_pred_obj)
             
-    # Special handling for ensemble model
+    # --- Special handling for ensemble model ---
     ensemble_models = train_ensemble_models(df)
     ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
-    y_preds_ensemble = []
+    
+    # CRITICAL FIX: Correctly align features and labels for ensemble backtesting
     features_full = feature_engineering(df)
-    val_features = features_full.loc[val_df.index].iloc[:-1]
-    for i in range(len(val_features)):
-        pred = [int(round(m.predict(val_features.iloc[i:i+1])[0])) for m in ensemble_models['lgb_median']]
+    # The true values (y) start from the second row of the original df, aligned with the first row of features
+    y_true_full = df.iloc[1:, :6] 
+    # Align the features with these true values
+    features_aligned = features_full.loc[y_true_full.index]
+    
+    _, X_test, _, y_test = train_test_split(features_aligned, y_true_full, test_size=0.2, shuffle=False)
+    
+    y_preds_ensemble = []
+    for i in range(len(X_test)):
+        pred = [int(round(m.predict(X_test.iloc[i:i+1])[0])) for m in ensemble_models['lgb_median']]
         y_preds_ensemble.append(sorted(pred))
-    y_trues_ensemble = val_df.iloc[1:, :6].values.tolist()
+    
+    y_trues_ensemble = y_test.values.tolist()
     
     accuracy = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble)
     precision = sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble)
@@ -268,6 +270,7 @@ def backtest_and_score(df):
     scored_predictions.append(ensemble_pred_final)
 
     return sorted(scored_predictions, key=lambda x: x['likelihood'], reverse=True)
+
 # =================================================================================================
 # Main Application UI & Logic
 # =================================================================================================
