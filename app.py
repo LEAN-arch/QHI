@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 10.4.0 (Definitive Index Alignment Fix)
+# VERSION: 10.5.0 (Critical Import Fix)
 #
 # DESCRIPTION:
 # This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
@@ -15,11 +15,10 @@
 # historical accuracy, precision, and closeness) and provide uncertainty intervals for each
 # predicted number.
 #
-# VERSION 10.4.0 ENHANCEMENTS:
-# - CRITICAL FIX (KeyError): Resolved the fatal `KeyError` during backtesting by implementing
-#   a robust index alignment strategy. The code now aligns the feature and label DataFrames
-#   based on the intersection of their indices, which is the industry-standard method for
-#   preventing such errors in time-series feature engineering.
+# VERSION 10.5.0 ENHANCEMENTS:
+# - CRITICAL FIX (NameError): Resolved the fatal `NameError` for `train_test_split` by
+#   restoring the missing import statement from `sklearn.model_selection`. This was preventing
+#   the entire backtesting and scoring module from executing.
 # =================================================================================================
 
 import streamlit as st
@@ -40,6 +39,7 @@ import pywt
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split # <-- CRITICAL FIX: Restored missing import
 import umap
 import hdbscan
 import lightgbm as lgb
@@ -181,7 +181,6 @@ def train_ensemble_models(_df):
     X = features.iloc[:-1]
     y = _df.loc[X.index].shift(-1).dropna().iloc[:, :6]
     
-    # Robust index alignment
     common_index = X.index.intersection(y.index)
     X = X.loc[common_index]
     y = y.loc[common_index]
@@ -253,12 +252,10 @@ def backtest_and_score(df):
     features_full = feature_engineering(df)
     y_true_full = df.shift(-1).dropna().iloc[:, :6]
     
-    # CRITICAL FIX: Align features and labels by their common index intersection
     common_index = features_full.index.intersection(y_true_full.index)
     features_aligned = features_full.loc[common_index]
     y_true_aligned = y_true_full.loc[common_index]
 
-    # Now split the perfectly aligned data
     _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
     
     y_preds_ensemble = []
