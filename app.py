@@ -3,17 +3,22 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 11.1.0 (Pandas DataFrame Fix)
+# VERSION: 11.0 (Chronos Anomaly Detector)
 #
 # DESCRIPTION:
-# This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
-# hybrid intelligence platform, running two parallel analysis suites.
+# This definitive version enhances the "System Dynamics" module into a full-fledged predictive
+# suite and introduces a new meta-analytical framework to assess "Predictive Maturity"—
+# determining how much historical data is required for the models to become robust.
 #
-# VERSION 11.1.0 ENHANCEMENTS:
-# - CRITICAL FIX (KeyError): Resolved a fatal `KeyError` in the "System Dynamics" module. The
-#   error was caused by an index mismatch when creating a pandas DataFrame from a Series.
-#   The fix involves converting the Series to a NumPy array (`.values`) before DataFrame
-#   construction, which is the robust, industry-standard method to prevent such errors.
+# VERSION 11.0 ENHANCEMENTS:
+# - ENHANCED SYSTEM DYNAMICS MODULE: This tab is now a predictive engine.
+#   - Restored and enhanced the "Number Zodiac" polar plot with its own predictive model.
+#   - Integrated the Calculus Momentum analysis as a core predictive model.
+# - NEW META-ANALYSIS: A "Predictive Maturity Curve" now shows how model performance (Likelihood
+#   Score) evolves as more historical data is included, answering the question of "how much
+#   data is enough?"
+# - PREDICTIVE ROBUSTNESS: All new models are fully integrated into the rigorous, walk-forward
+#   backtesting and scoring framework, competing for the highest Likelihood Score.
 # =================================================================================================
 
 import streamlit as st
@@ -41,7 +46,7 @@ import lightgbm as lgb
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v11.1: Chronos Detector",
+    page_title="LottoSphere v11.0: Chronos Detector",
     page_icon="⏳",
     layout="wide",
 )
@@ -94,7 +99,7 @@ def feature_engineering(_df):
     features.dropna(inplace=True)
     return features
 
-# --- 3. ACAUSAL ENGINE MODULES (PURE COMPUTE) ---
+# --- 3. ACAUSAL ENGINE MODULES ---
 
 @st.cache_data
 def analyze_quantum_fluctuations(_df):
@@ -129,7 +134,7 @@ def analyze_stochastic_resonance(_df):
     error = np.full(6, energy_df.head(12)['Energy'].std() / energy_df.head(12)['Energy'].mean() * 5)
     return {'name': 'Stochastic Resonance', 'prediction': pred, 'error': error, 'logic': 'Numbers with the highest energy in the wavelet domain, indicating resonance.'}
 
-# --- 4. STOCHASTIC AI GAUNTLET MODULES (PURE COMPUTE) ---
+# --- 4. STOCHASTIC AI GAUNTLET MODULES ---
 
 @st.cache_data
 def analyze_gmm_inference(_df):
@@ -142,21 +147,6 @@ def analyze_gmm_inference(_df):
     weighted_cov = np.tensordot(last_draw_probs, gmm.covariances_, axes=1)
     error = np.sqrt(np.diag(weighted_cov))
     return {'name': 'Bayesian GMM Inference', 'prediction': sorted(np.round(prediction).astype(int)), 'error': error, 'logic': 'A weighted average of cluster archetypes.'}
-
-@st.cache_data
-def analyze_topological_ai(_df):
-    reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=3, random_state=42)
-    embedding = reducer.fit_transform(_df.iloc[:, :6])
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=5, core_dist_n_jobs=-1).fit(embedding)
-    last_draw_cluster = clusterer.labels_[-1]
-    if last_draw_cluster != -1:
-        indices = np.where(clusterer.labels_ == last_draw_cluster)[0]
-        prediction = _df.iloc[indices, :6].mean().round().astype(int).values
-        error = _df.iloc[indices, :6].std().values
-    else:
-        prediction = _df.iloc[-5:, :6].mean().round().astype(int).values
-        error = _df.iloc[-5:, :6].std().values
-    return {'name': 'Topological AI (UMAP+HDBSCAN)', 'prediction': sorted(prediction), 'error': error, 'logic': 'Centroid of the cluster of the most recent draw.'}
 
 @st.cache_resource
 def train_ensemble_models(_df):
@@ -179,44 +169,32 @@ def predict_with_ensemble(df, models):
     upper = [m.predict(last_features)[0] for m in models['upper']]
     error = (np.array(upper) - np.array(lower)) / 2.0
     return {'name': 'Ensemble AI (LightGBM)', 'prediction': prediction, 'error': error, 'logic': 'Quantile Regression on engineered features.'}
-
 # --- 5. SYSTEM DYNAMICS MODULE & PREDICTORS ---
 @st.cache_data
 def analyze_system_dynamics(_df):
     # Sort each row to create stable time series for each position
-    sorted_df = pd.DataFrame(np.sort(_df.iloc[:,:6].values, axis=1), columns=[f'Pos {i+1}' for i in range(6)])
+    df_sorted = pd.DataFrame(np.sort(_df.iloc[:,:6].values, axis=1), columns=[f'Pos {i+1}' for i in range(6)])
     max_num = _df.iloc[:,:6].values.max()
 
     # --- 1. Calculus Dynamics ---
-    velocity = sorted_df.diff().fillna(0)
+    velocity = df_sorted.diff().fillna(0)
     acceleration = velocity.diff().fillna(0)
-    last_v = velocity.iloc[-1]; last_a = acceleration.iloc[-1]
+    last_v, last_a = velocity.iloc[-1], acceleration.iloc[-1]
     momentum_score = last_v - np.abs(last_a) * 0.5
-    
-    # CRITICAL FIX: Convert Series to NumPy arrays before creating the DataFrame to avoid index mismatch.
-    momentum_df = pd.DataFrame({
-        'Slot': sorted_df.columns, 
-        'Last Value': sorted_df.iloc[-1].values, 
-        'Velocity': last_v.values, 
-        'Acceleration': last_a.values, 
-        'Momentum Score': momentum_score.values
-    }).sort_values('Momentum Score', ascending=False)
-    
+    momentum_df = pd.DataFrame({'Slot': df_sorted.columns, 'Last Value': df_sorted.iloc[-1].values, 'Velocity': last_v.values, 
+                                'Acceleration': last_a.values, 'Momentum Score': momentum_score.values}).sort_values('Momentum Score', ascending=False)
     calc_pred = sorted(momentum_df.head(6)['Last Value'].astype(int).tolist())
     calc_error = np.full(6, momentum_df['Last Value'].std() * 0.5)
-    calculus_result = {'name': 'Calculus Momentum', 'prediction': calc_pred, 'error': calc_error, 'logic': 'Numbers from slots with highest stable momentum.'}
+    calculus_result = {'name': 'Calculus Momentum', 'prediction': calc_pred, 'error': calc_error, 'logic': 'Numbers from slots with highest stable positive momentum.'}
     
     # --- 2. Number Zodiac (Polar Plot) ---
     fig_zodiac = go.Figure()
     recent_draws = _df.iloc[-5:, :6]
     colors = px.colors.sequential.Plasma_r
     for i, (index, row) in enumerate(recent_draws.iterrows()):
-        theta = (row.values / max_num) * 360
-        r = [10 - i*1.5] * 6
-        fig_zodiac.add_trace(go.Scatterpolar(r=r, theta=theta, mode='markers', marker=dict(size=10, color=colors[i]), name=f'Draw {index} (Recent)'))
+        theta = (row.values / max_num) * 360; r = [10 - i*1.5] * 6
+        fig_zodiac.add_trace(go.Scatterpolar(r=r, theta=theta, mode='markers', marker=dict(size=10, color=colors[i]), name=f'Draw {index}'))
     fig_zodiac.update_layout(title='<b>The Number Zodiac:</b> Polar Projection of Recent Draws')
-
-    # Zodiac Prediction
     all_numbers = _df.iloc[:,:6].values.flatten()
     bins = np.linspace(0, max_num, 13)
     hist, _ = np.histogram(all_numbers, bins=bins)
@@ -224,17 +202,17 @@ def analyze_system_dynamics(_df):
     sector_start, sector_end = bins[densest_sector_index], bins[densest_sector_index+1]
     sector_numbers = [n for n in all_numbers if sector_start <= n < sector_end]
     zodiac_pred = sorted([num for num, count in Counter(sector_numbers).most_common(6)])
-    if len(zodiac_pred) < 6: 
+    if len(zodiac_pred) < 6:
         hot_fill = [n for n, c in Counter(all_numbers).most_common() if n not in zodiac_pred]
         zodiac_pred.extend(hot_fill[:6-len(zodiac_pred)])
-    zodiac_error = np.full(6, (sector_end-sector_start)/2)
-    zodiac_result = {'name': 'Number Zodiac Sector', 'prediction': zodiac_pred, 'error': zodiac_error, 'logic': f'Most frequent numbers from the densest polar sector ({int(sector_start)}-{int(sector_end)}).'}
+    zodiac_result = {'name': 'Number Zodiac Sector', 'prediction': zodiac_pred, 'error': np.full(6, (sector_end-sector_start)/2), 
+                     'logic': f'Most frequent numbers from the densest polar sector ({int(sector_start)}-{int(sector_end)}).'}
 
     return momentum_df, fig_zodiac, calculus_result, zodiac_result
 
-# --- 6. BACKTESTING & SCORING ---
+# --- 6. BACKTESTING & META-ANALYSIS ---
 @st.cache_data
-def backtest_and_score(df):
+def run_full_backtest_suite(df):
     split_point = int(len(df) * 0.8)
     val_df = df.iloc[split_point:]
     
@@ -242,32 +220,24 @@ def backtest_and_score(df):
         "Quantum Fluctuation": analyze_quantum_fluctuations,
         "Stochastic Resonance": analyze_stochastic_resonance,
         "Bayesian GMM Inference": analyze_gmm_inference,
-        "Topological AI (UMAP+HDBSCAN)": analyze_topological_ai
+        "Calculus Momentum": lambda d: analyze_system_dynamics(d)[2],
+        "Number Zodiac Sector": lambda d: analyze_system_dynamics(d)[3],
     }
-    
     scored_predictions = []
-    
     for name, func in model_funcs.items():
-        y_preds, y_trues = [], []
-        for i in range(len(val_df) - 1):
-            historical_df = df.iloc[:split_point+i]
-            y_preds.append(func(historical_df)['prediction'])
-            y_trues.append(val_df.iloc[i+1, :6].tolist())
-        if not y_preds: continue
-        hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds))
-        precise_hits = sum(1 for yt, yp in zip(y_trues, y_preds) if len(set(yt) & set(yp)) >= 3)
+        y_preds = [func(df.iloc[:split_point+i])['prediction'] for i in range(len(val_df))]
+        y_trues = val_df.iloc[:, :6].values.tolist()
+        hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds)); precise_hits = sum(1 for yt, yp in zip(y_trues, y_preds) if len(set(yt) & set(yp)) >= 3)
         accuracy, precision, rmse = hits/len(y_trues), precise_hits/len(y_trues), np.sqrt(mean_squared_error(y_trues, y_preds))
-        acc_score, prec_score, rmse_score = min(100, (accuracy/1.2)*100), min(100, (precision/0.1)*100), max(0, 100-(rmse/20.0)*100)
+        acc_score, prec_score, rmse_score = min(100,(accuracy/1.2)*100), min(100,(precision/0.1)*100), max(0,100-(rmse/20.0)*100)
         likelihood = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
         final_pred_obj = func(df)
         final_pred_obj['likelihood'], final_pred_obj['metrics'] = likelihood, {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
         scored_predictions.append(final_pred_obj)
             
-    # Ensemble model backtesting
     ensemble_models = train_ensemble_models(df)
     ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
-    features_full = feature_engineering(df)
-    y_true_full = df.shift(-1).dropna().iloc[:, :6]
+    features_full, y_true_full = feature_engineering(df), df.shift(-1).dropna().iloc[:, :6]
     common_index = features_full.index.intersection(y_true_full.index)
     features_aligned, y_true_aligned = features_full.loc[common_index], y_true_full.loc[common_index]
     _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
@@ -277,57 +247,56 @@ def backtest_and_score(df):
         accuracy = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble)
         precision = sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble)
         rmse = np.sqrt(mean_squared_error(y_trues_ensemble, y_preds_ensemble))
-        acc_score = min(100, (accuracy/1.2)*100); prec_score = min(100, (precision/0.1)*100); rmse_score = max(0, 100-(rmse/20.0)*100)
+        acc_score = min(100,(accuracy/1.2)*100); prec_score = min(100,(precision/0.1)*100); rmse_score = max(0, 100-(rmse/20.0)*100)
         ensemble_pred_final['likelihood'] = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
         ensemble_pred_final['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
     scored_predictions.append(ensemble_pred_final)
-
     return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
+
+@st.cache_data
+def analyze_predictive_maturity(df):
+    history_sizes = np.linspace(100, len(df), 10, dtype=int)
+    maturity_scores = []
+    progress_bar = st.progress(0, text="Analyzing Predictive Maturity...")
+    for i, size in enumerate(history_sizes):
+        if size < 50: continue
+        subset_df = df.iloc[:size]
+        scored_preds = run_full_backtest_suite(subset_df)
+        if scored_preds:
+            maturity_scores.append({'History Size': size, 'Top Likelihood Score': scored_preds[0]['likelihood']})
+        progress_bar.progress((i + 1) / len(history_sizes), text=f"Analyzing with {size} draws...")
+    progress_bar.empty()
+    return pd.DataFrame(maturity_scores)
 
 # =================================================================================================
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("💠 LottoSphere X: The Oracle Ensemble")
-st.markdown("An advanced instrument for modeling complex systems. This engine runs two parallel suites of analyses—**Acausal Physics** and **Stochastic AI**—to identify candidate sets with the highest likelihood based on rigorous historical backtesting.")
+st.title("⏳ LottoSphere v11.0: The Chronos Anomaly Detector")
+st.markdown("An advanced instrument for modeling complex systems. This engine identifies candidate sets with the highest likelihood based on rigorous, time-series backtesting, and analyzes the system's own predictive maturity.")
 
-if 'data_warning' not in st.session_state:
-    st.session_state.data_warning = None
-
+if 'data_warning' not in st.session_state: st.session_state.data_warning = None
 uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
 
 if uploaded_file:
     df_master = load_data(uploaded_file)
-    if st.session_state.data_warning:
-        st.warning(st.session_state.data_warning)
-        st.session_state.data_warning = None
+    if st.session_state.data_warning: st.warning(st.session_state.data_warning); st.session_state.data_warning = None
 
     if df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
-        
-        tab1, tab2 = st.tabs(["🔮 Predictive Analytics", "🔬 System Dynamics Explorer"])
+        tab1, tab2, tab3 = st.tabs(["🔮 Predictive Analytics", "🔬 System Dynamics Explorer", "🧠 Predictive Maturity"])
 
         with tab1:
-            st.header("Stage 1: Engage Oracle Ensemble")
+            st.header("Engage Oracle Ensemble")
             if st.button("RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
-                with st.spinner("Backtesting all models and calculating Likelihood Scores... This may take several minutes."):
-                    scored_predictions = backtest_and_score(df_master)
-                
-                st.header("✨ Stage 2: Final Synthesis & Strategic Portfolio")
+                scored_predictions = run_full_backtest_suite(df_master)
+                st.header("✨ Final Synthesis & Strategic Portfolio")
                 if scored_predictions:
-                    consensus_numbers = []
-                    for p in scored_predictions:
-                        weight = int(p['likelihood'] / 10) if p['likelihood'] > 0 else 1
-                        consensus_numbers.extend(p['prediction'] * weight)
-                    consensus_counts = Counter(consensus_numbers)
-                    hybrid_pred = sorted([num for num, count in consensus_counts.most_common(6)])
+                    hybrid_pred = sorted([num for num, count in Counter(np.array([p['prediction'] for p in scored_predictions]).flatten()).most_common(6)])
                     hybrid_error = np.mean([p['error'] for p in scored_predictions], axis=0)
-
                     st.subheader("🏆 Prime Candidate: Hybrid Consensus")
-                    st.markdown("The numbers that appeared most frequently across all models, weighted by each model's historical **Likelihood Score**.")
                     pred_str_hybrid = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(hybrid_pred, hybrid_error)])
                     st.success(f"## `{pred_str_hybrid}`")
-                    
                     st.subheader("Ranked Predictions by Model Performance")
                     for p in scored_predictions:
                         with st.container(border=True):
@@ -336,19 +305,12 @@ if uploaded_file:
                                 st.markdown(f"#### {p['name']}")
                                 pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
                                 st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
-                                st.caption(f"**Logic:** {p['logic']}")
                             with col2:
                                 st.metric("Likelihood Score", f"{p.get('likelihood', 0):.1f}%", help=f"Backtest Metrics: {p.get('metrics', {})}")
-                else:
-                    st.error("Could not generate scored predictions.")
-        
         with tab2:
             st.header("System Dynamics & Inter-Number Physics")
-            st.markdown("This module provides advanced visualizations to explore the intrinsic, time-dependent behavior of the number system.")
-            
-            with st.spinner("Calculating system dynamics..."):
-                momentum_df, fig_zodiac, calculus_result, zodiac_result = analyze_system_dynamics(df_master)
-                
+            st.markdown("This module provides visualizations and metrics to explore the intrinsic, time-dependent behavior of the number system.")
+            momentum_df, fig_zodiac, calculus_result, zodiac_result = analyze_system_dynamics(df_master)
             st.plotly_chart(fig_zodiac, use_container_width=True)
             st.subheader("Calculus Momentum Analysis")
             st.dataframe(momentum_df)
@@ -356,8 +318,16 @@ if uploaded_file:
             for p in [calculus_result, zodiac_result]:
                 pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
                 st.info(f"**{p['name']}:** {pred_str}", icon="➡️")
-
+        with tab3:
+            st.header("Predictive Maturity Analysis")
+            st.markdown("This analysis determines how the predictive power of the models evolves as more historical data is used. A plateau in the curve suggests the system has reached its maximum potential predictability with the given data.")
+            if st.button("RUN MATURITY ANALYSIS"):
+                maturity_df = analyze_predictive_maturity(df_master)
+                if not maturity_df.empty:
+                    fig_maturity = px.line(maturity_df, x='History Size', y='Top Likelihood Score', title="Predictive Maturity Curve", markers=True)
+                    fig_maturity.update_layout(yaxis_range=[0,100])
+                    st.plotly_chart(fig_maturity, use_container_width=True)
     else:
-        st.error(f"Invalid data format. After cleaning, the file does not have 6 number columns. Please check the input file.")
+        st.error("Invalid data format. After cleaning, the file must have 6 number columns.")
 else:
     st.info("Upload a CSV file to engage the Oracle Ensemble.")
