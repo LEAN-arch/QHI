@@ -1,24 +1,25 @@
 # =================================================================================================
-# LottoSphere v13.0: The Pattern Resonance Engine
+# LottoSphere v14.0: The Pattern Forecaster
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 13.0 (Pattern Prediction & State Transition Modeling)
+# VERSION: 14.0 (Probabilistic Number Forecasting)
 #
 # DESCRIPTION:
-# This definitive version re-frames the core problem from predicting numbers to predicting
-# the underlying mathematical PATTERN of the next draw. It models the lottery as a system that
-# transitions between a finite number of recurring "states" (clusters of similar patterns).
-# The engine's goal is to identify the current state and predict the most likely next state.
+# This definitive version completes the analytical pipeline by translating the predicted system
+# state (pattern) into a probabilistic forecast for the individual numbers. It introduces a
+# rigorous walk-forward backtesting framework to scientifically measure the historical accuracy
+# of the entire pattern-to-number forecasting process.
 #
 # CORE METHODOLOGY:
-# 1. MULTI-SCALE PATTERN TRANSFORMATION: Each draw is converted into a high-dimensional vector
-#    of over 20 mathematical properties (statistical, number theory, geometric, etc.).
-# 2. PATTERN CLUSTERING (HDBSCAN): Identifies recurring patterns or "system states" in the data.
-# 3. MARKOV CHAIN STATE TRANSITION MODEL: Calculates the historical probability of the system
-#    transitioning from any one state to another.
-# 4. PATTERN CONFORMANCE GENERATION: After predicting the most likely next pattern, the engine
-#    generates a set of six numbers that is the best possible fit for that pattern.
+# 1. PATTERN IDENTIFICATION: Transforms draws into high-dimensional pattern vectors and uses
+#    HDBSCAN to identify recurring system states (clusters).
+# 2. STATE TRANSITION MODELING: A Markov Chain predicts the most likely next state.
+# 3. PROBABILISTIC NUMBER FORECASTING (NEW): For each predicted state, the engine retrieves the
+#    historical probability distribution for each of the six number slots and generates a
+#    forecast with a data-driven Likelihood Score for each number.
+# 4. WALK-FORWARD BACKTESTING (NEW): The entire two-stage process is rigorously backtested on
+#    a validation set to produce a final, honest Historical Forecast Accuracy score.
 # =================================================================================================
 
 import streamlit as st
@@ -38,8 +39,8 @@ import hdbscan
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v13.0: Pattern Resonance Engine",
-    page_icon="🕸️",
+    page_title="LottoSphere v14.0: Pattern Forecaster",
+    page_icon="🎯",
     layout="wide",
 )
 np.random.seed(42)
@@ -78,110 +79,137 @@ def get_digital_root(n):
 
 @st.cache_data
 def create_pattern_dataframe(_df):
-    """The core transformation engine. Converts each draw into a rich mathematical pattern vector."""
     patterns = pd.DataFrame(index=_df.index)
     df_nums = _df.iloc[:, :6]
     df_sorted = pd.DataFrame(np.sort(df_nums.values, axis=1), index=_df.index)
     
-    # Statistical Properties
     patterns['sum'] = df_nums.sum(axis=1)
-    patterns['mean'] = df_nums.mean(axis=1)
     patterns['std'] = df_nums.std(axis=1)
-    patterns['range'] = df_nums.max(axis=1) - df_nums.min(axis=1)
-    
-    # Number Theory Properties
     patterns['odd_count'] = df_nums.apply(lambda r: sum(n % 2 for n in r), axis=1)
     patterns['prime_count'] = df_nums.apply(lambda r: sum(is_prime(n) for n in r), axis=1)
-    patterns['digital_root_sum'] = df_nums.apply(lambda r: sum(get_digital_root(n) for n in r), axis=1)
-    
-    # Spacing Properties
     gaps = df_sorted.diff(axis=1).dropna(axis=1)
     patterns['mean_gap'] = gaps.mean(axis=1)
-    patterns['std_gap'] = gaps.std(axis=1)
     
-    # Frequency Properties
-    all_numbers_flat = df_nums.values.flatten()
-    hot_cold_split = int(np.median(list(Counter(all_numbers_flat).values())))
-    counts = Counter(all_numbers_flat)
-    hot_numbers = {num for num, count in counts.items() if count > hot_cold_split}
-    patterns['hot_number_count'] = df_nums.apply(lambda r: sum(1 for n in r if n in hot_numbers), axis=1)
-    
-    # Geometric Properties (Barycentric)
     max_num = df_nums.values.max()
     low_b, high_b = max_num / 3, 2 * max_num / 3
     patterns['low_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if n <= low_b), axis=1)
     patterns['mid_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if low_b < n <= high_b), axis=1)
-    patterns['high_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if n > high_b), axis=1)
-
+    
     return patterns
 
 @st.cache_data
 def find_system_states(_pattern_df):
-    """Applies UMAP and HDBSCAN to identify recurring pattern clusters (states)."""
     scaler = StandardScaler()
     pattern_scaled = scaler.fit_transform(_pattern_df)
-    
     reducer = umap.UMAP(n_neighbors=20, min_dist=0.0, n_components=2, random_state=42)
     embedding = reducer.fit_transform(pattern_scaled)
-    
     clusterer = hdbscan.HDBSCAN(min_cluster_size=15, min_samples=5, gen_min_span_tree=True)
     cluster_labels = clusterer.fit_predict(embedding)
-    
     return cluster_labels, embedding
 
 @st.cache_data
 def build_markov_transition_matrix(cluster_labels):
-    """Calculates the state transition probabilities."""
     n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
     matrix = np.zeros((n_clusters, n_clusters))
-    
     for i in range(len(cluster_labels) - 1):
-        current_state = cluster_labels[i]
-        next_state = cluster_labels[i+1]
+        current_state, next_state = cluster_labels[i], cluster_labels[i+1]
         if current_state != -1 and next_state != -1:
             matrix[current_state, next_state] += 1
-            
-    # Normalize rows to get probabilities
     row_sums = matrix.sum(axis=1, keepdims=True)
-    # Avoid division by zero for states that were never visited
     row_sums[row_sums == 0] = 1
-    prob_matrix = matrix / row_sums
-    return prob_matrix
+    return matrix / row_sums
 
 @st.cache_data
-def generate_candidate_from_pattern(_df, pattern_vector):
-    """Finds the best 6-number combination to match a target pattern vector."""
-    # Create a pool of historically frequent and diverse numbers
-    hot_pool = [num for num, count in Counter(_df.values.flatten()).most_common(40)]
+def calculate_cluster_distributions(_df, cluster_labels):
+    """Pre-calculates the probability distribution of numbers for each position within each cluster."""
+    df_sorted = pd.DataFrame(np.sort(_df.iloc[:,:6].values, axis=1), index=_df.index, columns=[f'Pos_{i+1}' for i in range(6)])
+    df_sorted['cluster'] = cluster_labels
     
-    best_combo = None
-    min_distance = np.inf
+    distributions = {}
+    n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
     
-    # Generate a large sample of combinations to test
-    candidate_combos = list(combinations(hot_pool, 6))
-    np.random.shuffle(candidate_combos)
-    
-    for combo in candidate_combos[:10000]: # Test 10,000 candidates for speed
-        combo_df = pd.DataFrame([list(combo)], columns=[f'Number {i+1}' for i in range(6)])
-        # Create a single-row pattern df for the candidate
-        candidate_pattern_df = create_pattern_dataframe(combo_df)
-        
-        # Calculate Euclidean distance in scaled space
-        # We need to scale the candidate pattern the same way as the original
-        # For simplicity in this cached function, we'll use a simple distance
-        distance = np.linalg.norm(candidate_pattern_df.values[0] - pattern_vector.values[0])
-        
-        if distance < min_distance:
-            min_distance = distance
-            best_combo = combo
+    for i in range(n_clusters):
+        cluster_df = df_sorted[df_sorted['cluster'] == i]
+        if not cluster_df.empty:
+            cluster_dist = {}
+            for pos in range(6):
+                counts = cluster_df.iloc[:, pos].value_counts(normalize=True)
+                cluster_dist[f'Pos_{pos+1}'] = counts
+            distributions[i] = cluster_dist
             
-    return sorted(list(best_combo))
+    return distributions
+# --- 5. PREDICTION & BACKTESTING FUNCTIONS ---
+
+def generate_prediction_from_state(target_state, cluster_dists):
+    """Generates a 6-number prediction and likelihood scores from a predicted state."""
+    if target_state not in cluster_dists:
+        return [0]*6, [0]*6 # Return empty if state has no historical data
+
+    prediction = []
+    likelihoods = []
+    for pos in range(6):
+        pos_dist = cluster_dists[target_state].get(f'Pos_{pos+1}')
+        if pos_dist is not None and not pos_dist.empty:
+            most_likely_num = pos_dist.idxmax()
+            likelihood = pos_dist.max()
+            prediction.append(most_likely_num)
+            likelihoods.append(likelihood)
+        else:
+            prediction.append(0) # Placeholder
+            likelihoods.append(0)
+    
+    return prediction, likelihoods
+
+@st.cache_data
+def run_walk_forward_backtest(df):
+    """Performs a rigorous walk-forward validation of the entire pipeline."""
+    split_point = int(len(df) * 0.8)
+    val_df = df.iloc[split_point:]
+    
+    y_preds, y_trues = [], []
+    
+    progress_bar = st.progress(0, text="Performing walk-forward validation...")
+    for i in range(len(val_df) - 1):
+        # Train on all data up to the point of prediction
+        historical_df = df.iloc[:split_point + i + 1]
+        
+        # 1. Create patterns and find states on historical data
+        pattern_df = create_pattern_dataframe(historical_df)
+        cluster_labels, _ = find_system_states(pattern_df)
+        
+        # 2. Build transition matrix and get last state
+        transition_matrix = build_markov_transition_matrix(cluster_labels)
+        last_state = cluster_labels[-1]
+        
+        if last_state != -1:
+            # 3. Predict next state
+            predicted_next_state = np.argmax(transition_matrix[last_state])
+            
+            # 4. Calculate cluster distributions and generate number prediction
+            cluster_dists = calculate_cluster_distributions(historical_df, cluster_labels)
+            prediction, _ = generate_prediction_from_state(predicted_next_state, cluster_dists)
+            y_preds.append(prediction)
+            y_trues.append(val_df.iloc[i + 1, :6].tolist())
+        
+        progress_bar.progress((i + 1) / (len(val_df) - 1), text=f"Validating Draw {split_point + i + 1}...")
+    
+    progress_bar.empty()
+    if not y_preds: return {}
+
+    # Calculate overall performance metrics
+    hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds))
+    precise_hits = sum(1 for yt, yp in zip(y_trues, y_preds) if len(set(yt) & set(yp)) >= 3)
+    accuracy = hits / len(y_trues)
+    precision = precise_hits / len(y_trues)
+    
+    return {'Avg Hits per Draw': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.2%}"}
+
 # =================================================================================================
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("🕸️ LottoSphere v13.0: The Pattern Resonance Engine")
-st.markdown("This engine analyzes the **intrinsic behavior of the system** by identifying and predicting recurring **mathematical patterns**. It seeks to answer not 'what numbers will be drawn,' but 'what *kind* of draw is most likely to occur next?'")
+st.title("🎯 LottoSphere v14.0: The Pattern Forecaster")
+st.markdown("This engine predicts the **underlying mathematical pattern** of the next draw and then generates a **probabilistic number forecast** based on that pattern. The entire methodology is rigorously backtested to assess its historical forecasting accuracy.")
 
 if 'data_warning' not in st.session_state: st.session_state.data_warning = None
 uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
@@ -193,56 +221,29 @@ if uploaded_file:
     if df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
-        if st.sidebar.button("DETECT SYSTEM STATE & PREDICT NEXT PATTERN", type="primary", use_container_width=True):
+        if st.sidebar.button("FORECAST NEXT PATTERN & NUMBERS", type="primary", use_container_width=True):
             
-            # --- STAGE 1: Pattern Transformation ---
-            st.header("Stage 1: Multi-Scale Pattern Transformation")
-            st.markdown("The engine begins by 'zooming out' from the raw numbers, transforming each draw into a high-dimensional vector of over 10 distinct mathematical properties. This allows us to analyze the behavior of the system at a higher level of abstraction.")
-            with st.spinner("Transforming draws into pattern vectors..."):
+            # --- STAGE 1 & 2: Pattern Analysis and State Identification ---
+            st.header("Stage 1: Identifying System States")
+            st.markdown("The engine first transforms each draw into a mathematical pattern and then uses advanced clustering to identify recurring states in the system's history.")
+            with st.spinner("Analyzing patterns and identifying system states..."):
                 pattern_df = create_pattern_dataframe(df_master)
-            with st.expander("View Pattern DataFrame"):
-                st.dataframe(pattern_df)
-            st.success("Pattern transformation complete.")
-            st.markdown("---")
-            
-            # --- STAGE 2: System State Identification ---
-            st.header("Stage 2: Identifying Hidden System States")
-            st.markdown("Using advanced clustering (`HDBSCAN`) on the pattern vectors, we identify recurring, stable patterns in the system's history. Each cluster represents a distinct 'state' or behavioral mode of the lottery.")
-            with st.spinner("Clustering patterns to find system states..."):
                 cluster_labels, embedding = find_system_states(pattern_df)
-                pattern_df['Cluster'] = [f'State {l}' if l != -1 else 'Chaotic Transition' for l in cluster_labels]
-                
+                pattern_df['State'] = [f'State {l}' if l != -1 else 'Chaotic' for l in cluster_labels]
+            
             embedding_df = pd.DataFrame(embedding, columns=['UMAP 1', 'UMAP 2'])
-            embedding_df['State'] = pattern_df['Cluster']
-            fig = px.scatter(embedding_df, x='UMAP 1', y='UMAP 2', color='State', 
-                             title="Topological Map of System States (UMAP)",
-                             hover_data={ 'State': True, 'Draw': pattern_df.index })
+            embedding_df['State'] = pattern_df['State']
+            fig = px.scatter(embedding_df, x='UMAP 1', y='UMAP 2', color='State', title="Topological Map of System States (UMAP)")
             st.plotly_chart(fig, use_container_width=True)
-            st.success(f"Identified **{len(set(cluster_labels)) - 1}** distinct behavioral states and categorized chaotic transitions.")
+            st.success(f"Identified **{len(set(cluster_labels)) - 1}** distinct behavioral states.")
             st.markdown("---")
 
-            # --- STAGE 3: State Transition Modeling ---
-            st.header("Stage 3: Modeling the Flow Between States (Markov Chain)")
-            st.markdown("The engine now calculates the historical probability of moving from any one state to another. This **State Transition Matrix** reveals the 'rules' of the system's behavior, showing the most likely paths the system takes over time.")
-            with st.spinner("Building State Transition Matrix..."):
+            # --- STAGE 3: State Transition Modeling and Prediction ---
+            st.header("Stage 2: Predicting the Next System State")
+            st.markdown("Using a Markov Chain model, we analyze the historical flow between states to predict the most probable next state.")
+            with st.spinner("Building State Transition Model..."):
                 transition_matrix = build_markov_transition_matrix(cluster_labels)
             
-            fig_matrix = go.Figure(data=go.Heatmap(
-                z=transition_matrix,
-                x=[f'To State {i}' for i in range(transition_matrix.shape[1])],
-                y=[f'From State {i}' for i in range(transition_matrix.shape[0])],
-                colorscale='Blues'
-            ))
-            fig_matrix.update_layout(title="State Transition Probability Matrix")
-            st.plotly_chart(fig_matrix, use_container_width=True)
-            st.success("State transition model complete.")
-            st.markdown("---")
-
-            # --- STAGE 4: Prediction & Synthesis ---
-            st.header("Stage 4: Prediction and Candidate Generation")
-            st.markdown("Based on the system's most recent state, we use the transition matrix to predict the most probable next state, and then generate a set of six numbers that best conforms to that predicted pattern.")
-            
-            # Identify current and predict next state
             last_state = cluster_labels[-1]
             if last_state != -1:
                 st.info(f"The system's most recent draw was identified as belonging to **State {last_state}**.")
@@ -251,24 +252,39 @@ if uploaded_file:
                 likelihood = next_state_probs[predicted_next_state]
                 st.success(f"The model predicts the system will transition to **State {predicted_next_state}** with a likelihood of **{likelihood:.1%}**.")
                 
-                # Find the central pattern of the predicted state
-                target_pattern_vector = pattern_df[pattern_df['Cluster'] == f'State {predicted_next_state}'].drop(columns=['Cluster']).mean().to_frame().T
-
-                # Generate a number combination that fits this pattern
-                with st.spinner("Generating best-fit number combination for the predicted pattern..."):
-                    final_candidate = generate_candidate_from_pattern(df_master, target_pattern_vector)
+                # --- STAGE 4: Probabilistic Number Forecast ---
+                st.header("Stage 3: Probabilistic Number Forecast")
+                st.markdown(f"Based on the prediction that the next draw will be a **State {predicted_next_state}** pattern, the engine has calculated the most likely number for each of the six sorted positions.")
+                with st.spinner("Calculating cluster distributions and generating forecast..."):
+                    cluster_dists = calculate_cluster_distributions(df_master, cluster_labels)
+                    prediction, likelihoods = generate_prediction_from_state(predicted_next_state, cluster_dists)
                 
-                st.subheader("🏆 Prime Candidate Set")
-                st.markdown(f"The following set of six numbers is the optimal fit for the predicted pattern of **State {predicted_next_state}**.")
-                st.success(f"## `{final_candidate}`")
+                if prediction[0] != 0:
+                    pred_df = pd.DataFrame({
+                        'Position': [f'Position {i+1}' for i in range(6)],
+                        'Predicted Number': prediction,
+                        'Likelihood Score': [f"{l:.1%}" for l in likelihoods]
+                    })
+                    st.dataframe(pred_df, use_container_width=True, hide_index=True)
 
-                with st.expander("View Target Pattern Profile"):
-                    st.dataframe(target_pattern_vector)
+                    st.subheader("🏆 Prime Candidate Set")
+                    st.success(f"## `{sorted(prediction)}`")
+                else:
+                    st.error("The predicted state has no historical precedent, cannot generate a number forecast.")
             else:
-                st.warning("The system's most recent draw was a chaotic transition (not in a stable state). Predictive power is reduced. A general high-frequency set is recommended as a fallback.")
-                hot_numbers = sorted([num for num, count in Counter(df_master.values.flatten()).most_common(6)])
-                st.success(f"## Fallback Recommendation: `{hot_numbers}`")
+                st.warning("The system's most recent draw was a chaotic transition. A specific state cannot be predicted.")
+
+            # --- STAGE 5: Backtesting and Performance Assessment ---
+            st.header("Stage 4: Historical Forecasting Accuracy")
+            st.markdown("To scientifically validate this entire two-stage methodology, we performed a rigorous walk-forward backtest on the last 20% of the historical data. The results below show how accurately this pattern-based approach would have predicted the numbers in the past.")
+            backtest_results = run_walk_forward_backtest(df_master)
+            if backtest_results:
+                st.metric("Historical Average Hits per Draw", backtest_results['Avg Hits per Draw'])
+                st.metric("Historical High-Tier (3+) Hit Rate", backtest_results['3+ Hit Rate'])
+            else:
+                st.warning("Not enough data to perform a full backtest.")
+
     else:
         st.error(f"Invalid data format. After cleaning, the file must have 6 number columns.")
 else:
-    st.info("Upload a CSV file to engage the Pattern Resonance Engine.")
+    st.info("Upload a CSV file to engage the Pattern Forecaster Engine.")
