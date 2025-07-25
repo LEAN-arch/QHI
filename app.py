@@ -273,7 +273,7 @@ def train_torch_model(_df, model_type='LSTM', seq_length=3, epochs=100, batch_si
         
         return model, scaler, best_loss
     except Exception as e:
-        st.error(f"Error training {model_type.__name__} model: {e}")
+        st.error(f"Error training {model_type} model: {e}")
         return None, None, float('inf')
 
 @st.cache_data
@@ -283,7 +283,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
         if model is None:
             raise ValueError(f"{model_type} model training failed")
         
-        last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, _df.shape[1])
+        last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
         last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
         
         model.eval()
@@ -291,8 +291,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
             pred_scaled = model(last_seq_torch)
         
         prediction = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
-        
-        # Clamp predictions to position-specific maximums and ensure uniqueness
+        # Clamp to valid range and ensure uniqueness
         prediction = np.clip(np.round(prediction), 1, max_nums).astype(int)
         unique_preds = []
         seen = set()
@@ -317,7 +316,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
         
         return {
             'name': model_type,
-            'prediction': sorted(unique_preds,
+            'prediction': sorted(unique_preds),
             'error': error,
             'logic': f'Deep learning {model_type} sequence forecast.'
         }
@@ -337,19 +336,19 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
             raise ValueError("Insufficient data for Hilbert embedding")
         
         # Use maximum of position-specific maxs for complex plane
-        max_num = int(max(max_nums))
+        max_num = max(max_nums)
         
         # Map numbers to complex plane
         def to_complex(n):
             return np.exp(1j * 2 * np.pi * n / max_num)
         
-        complex_df = _df.apply(lambda x: [to_complex(v) for v in x])
-        mean_vector = np.mean([complex_df.iloc[i].values for i in range(len(complex_df))], axis=1)
+        complex_df = _df.apply(lambda x: to_complex(x))
+        mean_vector = complex_df.mean(axis=1)
         
         # Extrapolate next mean vector
-        last_phase, last_amp = np.angle(mean_vector[-1]), np.abs(mean_vector[-1])
-        phase_velocity = np.angle(mean_vector[-1] / mean_vector[-2])
-        amp_velocity = np.abs(mean_vector[-1]) - np.abs(mean_vector[-2])
+        last_phase, last_amp = np.angle(mean_vector.iloc[-1]), np.abs(mean_vector.iloc[-1])
+        phase_velocity = np.angle(mean_vector.iloc[-1] / mean_vector.iloc[-2])
+        amp_velocity = np.abs(mean_vector.iloc[-1]) - np.abs(mean_vector.iloc[-2])
         
         next_phase = last_phase + phase_velocity
         next_amp = max(1e-10, last_amp + amp_velocity)  # Avoid zero amplitude
@@ -393,7 +392,6 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
             'error': error,
             'logic': 'Predicts next draw\'s geometric center in a complex Hilbert space.'
         }
-    
     except Exception as e:
         st.error(f"Error in Hilbert embedding: {e}")
         return {
@@ -425,44 +423,40 @@ def run_full_backtest_suite(df, max_nums=[49]*6):
             'Hilbert Embedding': lambda d: analyze_hilbert_embedding(d, max_nums=max_nums),
         }
         
-        progress_bar = st.progress(0, text="Backtesting all models...")
+        progress_bar = st.progress(0, text="Backtesting models...")
         total_steps = len(val_df) * len(model_funcs)
         current_step = 0
         
-        for name, func in zip(model_funcs.keys(), model_funcs.values()):
-            try:
-                y_preds, y_trues = [], []
-                for i in range(len(val_df)):
-                    historical_df = df.iloc[:split_point + i]
-                    pred = func(historical_df)['prediction']
-                    if all(p == 0 for p in pred):
-                        continue
-                    y_preds.append(pred)
-                    y_trues.append(val_df.iloc[i].values.tolist())
-                    current_step += 1
-                    progress_bar.progress(min(1.0, current_step / total_steps), f"Backtesting {name} on draw {i+1}")
-                
-                if not y_preds:
-                    likelihood = 0
-                    metrics = {'Avg Hits': 'N/A'}
-                else:
-                    hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds))
-                    rmse = np.sqrt(mean_squared_error(y_trues, y_preds))
-                    accuracy = hits / len(y_trues)
-                    likelihood = 0.6 * min(100, (accuracy / 1.0)) * 100 + 0.4 * max(0, 100 - rmse * 5)
-                    metrics = {'Avg Hits': f"{accuracy:.2f}", 'RMSE': f"{rmse:.2f}"}
-                
-                final_pred_obj = func(df)
-                final_pred_obj['likelihood'] = likelihood
-                final_pred_obj['metrics'] = metrics
-                scored_predictions.append(final_pred_obj)
-            except Exception as e:
-                st.warning(f"Backtesting failed for {name}: {e}")
-                continue
+        for name, func in model_funcs.items():
+            y_preds, y_trues = [], []
+            for i in range(len(val_df)):
+                historical_df = df.iloc[:split_point + i]
+                pred = func(historical_df)['prediction']
+                if all(p == 0 for p in pred):  # Skip failed predictions
+                    continue
+                y_preds.append(pred)
+                y_trues.append(val_df.iloc[i].values.tolist())
+                current_step += 1
+                progress_bar.progress(min(1.0, current_step / total_steps), text=f"Backtesting {name} on draw {i+1}")
+            
+            if not y_preds:
+                likelihood = 0
+                metrics = {'Avg Hits': 'N/A'}
+            else:
+                hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds))
+                rmse = np.sqrt(mean_squared_error(y_trues, y_preds))
+                accuracy = hits / len(y_trues)
+                likelihood = 0.6 * min(100, (accuracy / 1.0) * 100) + 0.4 * max(0, 100 - rmse * 5)
+                metrics = {'Avg Hits': f"{accuracy:.2f}", 'RMSE': f"{rmse:.2f}"}
+            
+            final_pred_obj = func(df)
+            final_pred_obj['likelihood'] = likelihood
+            final_pred_obj['metrics'] = metrics
+            scored_predictions.append(final_pred_obj)
         
         progress_bar.empty()
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
-    except Exception Graphene as e:
+    except Exception as e:
         st.error(f"Error in backtesting suite: {e}")
         return []
 
@@ -495,8 +489,8 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
             ]
             val_trues = val.values.tolist()
             hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(val_trues, val_preds))
-            accuracy = hits / len(val)
-            maturity_scores.append({'History Size': size, 'Accuracy': (accuracy / 1.0) * 100})
+            accuracy = hits / len(val_trues)
+            maturity_scores.append({'History Size': size, 'Likelihood Score': (accuracy / 1.0) * 100})
             
             progress_bar.progress((idx + 1) / total_steps, text=f"Analyzed history size {size}")
         
@@ -512,27 +506,24 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("Quantum Chronodynamics Engine v16.0.2")
-st.markdown("""
-A scientific platform for analyzing high-dimensional, chaotic systems. Models lottery number positions as evolving
-dynamical systems using advanced mathematical and AI techniques.
-""")
+st.title("⚛️ LottoSphere v16.0.2: The Quantum Chronodynamics Engine")
+st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical and AI techniques.")
 
 if 'data_warning' not in st.session_state:
     st.session_state.data_warning = None
 if 'error_messages' not in st.session_state:
     st.session_state.error_messages = []
 
-# --- Sidebar Configuration ---
+# Sidebar Configuration
 st.sidebar.header("Configuration")
 seq_length = st.sidebar.slider("Sequence Length", min_value=3, max_value=6, value=3)
 
-# Calculate default max numbers based on sequence length
-default_max_num = 49 + (6 - seq_length) * 10  # e.g., 79 for seq_length=3, 49 for seq_length=6
+# Default max numbers based on sequence length
+default_max_num = 49 + (6 - seq_length) * 10
 max_nums = []
 for i in range(6):
     max_num = st.sidebar.number_input(
-        f"Max Number Pos{i+1}",
+        f"Max Number Pos_{i+1}",
         min_value=10,
         max_value=100,
         value=min(default_max_num, 100),
@@ -540,14 +531,14 @@ for i in range(6):
     )
     max_nums.append(max_num)
 
-epochs = st.sidebar.slider("Training Epochs", min_value=50, max_value=200, value=50)
+epochs = st.sidebar.slider("Training Epochs", min_value=50, max_value=200, value=100)
 
-uploaded_file = st.sidebar.file_uploader("Upload Numbers.csv", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
 
 if st.session_state.error_messages:
     for msg in st.session_state.error_messages:
         st.error(msg)
-    st.session_state.error_messages.clear()
+    st.session_state.error_messages = []
 
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
@@ -558,40 +549,37 @@ if uploaded_file:
     if not df_master.empty and df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
-        tab1, tab2, tab3 = st.tabs(["🔮 Predictive Analytics", "🔢 System Dynamics Explorer", "🧠 Machine Learning Maturity"])
+        tab1, tab2, tab3 = st.tabs(["🔮 Predictive Analytics", "🔬 System Dynamics Explorer", "🧠 Predictive Maturity"])
 
         with tab1:
-            st.header("🚀 Engage Predictive Analytics")
-            if st.button("RUN ALL MODELS", type="primary", use_container_width=True):
-                try:
-                    with st.spinner("Running backtesting suite... This may take a few minutes."):
-                        scored_predictions = run_full_backtest(df_master, max_nums=max_nums)
-                    
-                    st.header("🌟 Final Synthesis & Strategic Portfolio")
-                    if scored_predictions:
-                        st.subheader("Ranked Model Predictions")
-                        for p in scored_predictions:
-                            with st.container():
-                                col1, col2 = st.columns([3, 1])
-                                with col1:
-                                    st.markdown(f"#### {p['name']}")
-                                    pred_str = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(p['prediction'], p['error'])])
-                                    st.markdown(f"**Prediction: {pred_str}**", unsafe_allow_html=True)
-                                with col2:
-                                    st.metric("Likelihood Score", f"{p.get('likelihood', 0):.1f}%", help=f"Metrics: {p.get('metrics', {})}")
-                except Exception as e:
-                    st.error(f"Error in predictive analytics: {e}")
+            st.header("Engage Grand Unified Predictive Ensemble")
+            if st.button("RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
+                with st.spinner("Backtesting all models... This may take several minutes."):
+                    scored_predictions = run_full_backtest_suite(df_master, max_nums=max_nums)
+                
+                st.header("✨ Final Synthesis & Strategic Portfolio")
+                if scored_predictions:
+                    st.subheader("Ranked Predictions by Historical Performance")
+                    for p in scored_predictions:
+                        with st.container(border=True):
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"#### {p['name']}")
+                                pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
+                                st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
+                            with col2:
+                                st.metric("Likelihood Score", f"{p.get('likelihood', 0):.1f}%", help=f"Backtest Metrics: {p.get('metrics', {})}")
 
         with tab2:
-            st.header("🔢 System Dynamics Explorer")
-            st.markdown("Explore the time-dependent behavior of the number system.")
+            st.header("System Dynamics Explorer")
+            st.markdown("Explore the intrinsic, time-dependent behavior of the number system.")
             position = st.selectbox("Select Position", options=df_master.columns, index=0)
             if st.button("ANALYZE DYNAMICS"):
-                with st.spinner("Computing system dynamics..."):
+                with st.spinner("Calculating system dynamics..."):
                     dynamic_results = analyze_temporal_behavior(df_master, position=position)
                 
                 if dynamic_results:
-                    st.subheader(f"Dynamic Analysis for {position}")
+                    st.subheader(f"Chaotic & Cyclical Analysis ({position})")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.plotly_chart(dynamic_results['recurrence_fig'], use_container_width=True)
@@ -600,12 +588,12 @@ if uploaded_file:
                     st.plotly_chart(dynamic_results['wavelet_fig'], use_container_width=True)
                     if dynamic_results['lyapunov'] > 0:
                         st.warning(
-                            f"**Lyapunov Exponent:** `{dynamic_results['lyapunov']:.4f}`. Indicates a chaotic system sensitive to initial conditions.",
+                            f"**Lyapunov Exponent:** `{dynamic_results['lyapunov']:.4f}`. A positive value suggests the system is chaotic and highly sensitive to initial conditions.",
                             icon="⚠️"
                         )
                     else:
                         st.success(
-                            f"**Lyapunov Exponent:** `{dynamic_results['lyapunov']:.4f}`. Suggests a stable or periodic system.",
+                            f"**Lyapunov Exponent:** `{dynamic_results['lyapunov']:.4f}`. A non-positive value suggests the system is stable or periodic, not chaotic.",
                             icon="✅"
                         )
                         if 'periodicity_description' in dynamic_results:
@@ -617,24 +605,24 @@ if uploaded_file:
                                 st.plotly_chart(dynamic_results['acf_fig'], use_container_width=True)
 
         with tab3:
-            st.header("🧠 Machine Learning Maturity Analysis")
-            st.markdown("Analyze how predictive performance evolves with increasing data.")
-            model_type = st.selectbox("Select Model Type", options=['LSTM', 'GRU'], index=0)
+            st.header("Predictive Maturity Analysis")
+            st.markdown("Determine how predictive power evolves with historical data size.")
+            model_type = st.selectbox("Select Model", options=['LSTM', 'GRU'], index=0)
             if st.button("RUN MATURITY ANALYSIS"):
-                with st.spinner("Computing maturity analysis... This is compute-intensive."):
+                with st.spinner("Performing iterative backtesting... This is computationally expensive."):
                     maturity_df, delta_df = analyze_predictive_maturity(df_master, model_type=model_type, max_nums=max_nums)
                 if not maturity_df.empty:
-                    st.subheader("Performance vs. Data Size")
+                    st.subheader("Model Performance vs. History Size")
                     fig_maturity = px.line(
                         maturity_df,
                         x='History Size',
-                        y='Accuracy Score',
-                        title="Accuracy vs. History Size",
+                        y='Likelihood Score',
+                        title="Predictive Maturity Curve",
                         markers=True
                     )
                     st.plotly_chart(fig_maturity, use_container_width=True)
-                    st.subheader("Prediction Stability")
-                    st.markdown("Shows how predictions stabilize with more data.")
+                    st.subheader("Prediction Stability (Convergence)")
+                    st.markdown("Shows how predictions for the next draw change with more data.")
                     fig_delta = px.line(
                         delta_df,
                         x=delta_df.index,
@@ -644,121 +632,6 @@ if uploaded_file:
                     )
                     st.plotly_chart(fig_delta, use_container_width=True)
     else:
-        st.error("Invalid data format. Must have 6 columns and at least 50 rows.")
+        st.error("Invalid data format. After cleaning, the file must have 6 number columns and at least 50 rows.")
 else:
-    st.info("Upload a CSV file to start the engine.")
-</xai_archive>
-
-### Key Changes
-
-1. **Sidebar Configuration**:
-   - Changed `seq_length` slider to `min_value=3, max_value=6, value=3`.
-   - Replaced `max_num` with six `number_input` fields for `Max Number Pos{i+1}`, defaulting to `49 + (6 - seq_length) * 10`.
-   - Stored maximums in `max_nums` list.
-
-2. **Data Validation (`load_data`)**:
-   - Updated to accept `max_nums` list and validate each column against its respective maximum.
-   - Ensured sorted values respect position-specific maximums using `np.clip`.
-
-3. **Predictive Models**:
-   - Updated `train_torch_model` and `predict_torch_model` to use `seq_length` default of 3.
-   - Modified `predict_torch_model` to clamp predictions to `max_nums[i]` and ensure uniqueness per position.
-   - Updated `analyze_hilbert_embedding` to use `max(max_nums)` for the complex plane and map predictions to position-specific bounds.
-
-4. **Backtesting and Maturity**:
-   - Passed `max_nums` to `run_full_backtest` and `analyze_predictive_maturity`.
-   - Ensured predictions respect position-specific maximums.
-
-5. **Preserved Content**:
-   - All functions and UI components (including periodicity analysis in `tab2`) remain intact.
-   - No changes to `requirements.txt` since no new libraries were added.
-
-### Updated `requirements.txt` (Unchanged)
-
-The `requirements.txt` file remains the same as previously provided, as no new dependencies were introduced:
-
-```plaintext
-# requirements.txt for LottoSphere v16.0.2
-# Compatible with Python 3.11
-# Install with: pip install -r requirements.txt
-
-streamlit==1.29.0
-pandas==2.2.2
-numpy==1.26.3
-plotly==5.15.0
-matplotlib==3.9.2
-scikit-learn==1.5.2
-umap-learn==0.5.6
-hdbscan==0.8.33
-pywavelets==1.7
-scipy==1.14.0
-nolds==0.5.2
-torch==2.4.0
-statsmodels==0.14.2
-
-# Notes:
-# - For GPU support, install PyTorch with CUDA manually, e.g.:
-#   pip install torch==2.4.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
-#   (Adjust CUDA version based on your system: cu118 for CUDA 11.8, cu121 for CUDA 12.1, etc.)
-# - Ensure Python 3.11 is used for compatibility.
-```
-
-### Testing Instructions
-
-1. **Environment Setup**:
-   - Use Python 3.11 in a virtual environment:
-     ```bash
-     python -m venv venv
-     source venv/bin/activate  # Linux/Mac
-     venv\Scripts\activate     # Windows
-     ```
-   - Install dependencies:
-     ```bash
-     pip install -r requirements.txt
-     ```
-
-2. **Run the Application**:
-   - Save the updated code as `app.py` and run:
-     ```bash
-     streamlit run app.py
-     ```
-
-3. **Test Data**:
-   - Create a CSV with 6 columns of integers, each column respecting its configured maximum (e.g., 79 for `seq_length=3`). Example (`numbers.csv`):
-     ```csv
-     3,15,27,34,41,50
-     7,12,19,28,39,45
-     1,20,25,36,42,49
-     ...
-     ```
-   - Upload via Streamlit sidebar.
-
-4. **Verify Changes**:
-   - **Sidebar**: Confirm `Sequence Length` ranges from 3 to 6. Check that `Max Number Pos{i}` fields default to `49 + (6 - seq_length) * 10` (e.g., 79 for `seq_length=3`).
-   - **Data Validation**: Upload a CSV with numbers exceeding position-specific maximums; verify invalid rows are discarded with a warning.
-   - **Predictions**: Run `tab1` models and ensure predictions respect each position’s maximum and are unique.
-   - **Dynamics**: In `tab2`, confirm periodicity analysis works as before for non-positive Lyapunov exponents.
-   - **Maturity**: In `tab3`, verify analysis respects position-specific maximums.
-
-5. **Handle Errors**:
-   - If errors occur (e.g., invalid CSV, insufficient data), note the traceback and UI error messages.
-   - Share CSV structure, `pip list` output, and Python version for further debugging.
-
-### Notes
-
-- **Max Number Dependency**:
-  - The heuristic `49 + (6 - seq_length) * 10` provides a reasonable default, increasing the range for shorter sequences. Adjust this formula in the code if different defaults are preferred.
-  - Users can set different maximums per position, offering flexibility for varied lottery formats.
-
-- **Sequence Length**:
-  - Shorter sequences (3–6) reduce computational load but may limit model performance for complex patterns. Test with different lengths to balance accuracy and speed.
-
-- **Validation**:
-  - The code enforces unique numbers per row and position-specific maximums, which may discard rows if the input CSV doesn’t comply. Ensure input data matches the configured `max_nums`.
-
-- **Potential Enhancements**:
-  - Add constraints to ensure `max_nums[i] ≤ max_nums[i+1]` to reflect sorted positions.
-  - Allow dynamic sequence length per model in `tab3`.
-  - If needed, I can refine the max number heuristic or add more validation logic.
-
-If you encounter issues or need further modifications (e.g., additional constraints, UI tweaks), please provide details (traceback, CSV sample, or requirements), and I’ll assist promptly.
+    st.info("Upload a CSV file to engage the Engine.")
