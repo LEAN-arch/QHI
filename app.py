@@ -104,14 +104,18 @@ def analyze_calculus_dynamics(df):
     st.header("∫ Module 1: Calculus & System Dynamics")
     st.markdown("This module applies numerical calculus to analyze the 'motion' of each number slot over time. We calculate velocity, acceleration, and jerk to identify numbers with stable, positive momentum.")
 
+    # Sort each draw to create semi-stable time series for each slot
     sorted_df = pd.DataFrame(np.sort(df.iloc[:, :6].values, axis=1), columns=[f'Num_{i+1}' for i in range(6)])
     
+    # Calculate numerical derivatives
     velocity = sorted_df.diff()
     acceleration = velocity.diff()
     
+    # Get the most recent dynamic state
     last_v = velocity.iloc[-1]
     last_a = acceleration.iloc[-1]
     
+    # Scoring: Reward positive velocity and low (stable) acceleration
     momentum_score = last_v - np.abs(last_a) * 0.5
     momentum_df = pd.DataFrame({
         'Slot': sorted_df.columns,
@@ -124,6 +128,7 @@ def analyze_calculus_dynamics(df):
     st.write("Recent Dynamic State of Number Slots:")
     st.dataframe(momentum_df)
     
+    # Prediction: the last values from the slots with the highest momentum score
     pred = sorted(momentum_df.head(6)['Last_Value'].astype(int).tolist())
     
     return {'Calculus Momentum': {'prediction': pred, 'logic': 'Numbers from the slots exhibiting the highest stable positive momentum (velocity - |acceleration|).'}}
@@ -134,20 +139,27 @@ def analyze_linear_algebra(df):
     st.markdown("This module treats the entire lottery history as a system governed by linear relationships. By decomposing the number covariance matrix, we find its **eigenvectors**—the fundamental 'modes of vibration' of the system. The prediction is based on the most dominant mode.")
 
     data = df.iloc[:, :6].values
+    # Compute the covariance matrix
     cov_matrix = np.cov(data.T)
+    
+    # Perform eigenvalue decomposition
     eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+    
+    # Find the dominant eigenvector (corresponding to the largest eigenvalue)
     dominant_eigenvector_index = np.argmax(eigenvalues)
     dominant_eigenvector = eigenvectors[:, dominant_eigenvector_index]
     
+    # The components of the eigenvector represent the 'loadings' or importance of each number slot
     eigen_df = pd.DataFrame({
         'Number_Slot': [f'Num_{i+1}' for i in range(6)],
-        'Eigenvector_Loading': np.abs(dominant_eigenvector)
+        'Eigenvector_Loading': np.abs(dominant_eigenvector) # Use absolute value for importance
     }).sort_values('Eigenvector_Loading', ascending=False)
 
     st.write("Dominant Eigenvector Loadings:")
     fig = px.bar(eigen_df, x='Number_Slot', y='Eigenvector_Loading', title='Importance of Each Number Slot in the Dominant System Mode')
     st.plotly_chart(fig, use_container_width=True)
     
+    # Prediction: Numbers that most frequently appear in the top slots of the dominant eigenvector
     top_slots = eigen_df.head(6)['Number_Slot'].index
     hot_numbers_in_top_slots = Counter(df.iloc[:, top_slots].values.flatten()).most_common(6)
     pred = sorted([num for num, count in hot_numbers_in_top_slots])
@@ -161,14 +173,18 @@ def analyze_physics_momentum(df):
     
     center_of_mass = df.iloc[:, :6].mean(axis=1)
     com_velocity = center_of_mass.diff()
+    
+    # Calculate momentum using EWMA
     com_momentum = com_velocity.ewm(span=10, adjust=False).mean()
     
+    # Project the next state
     last_com = center_of_mass.iloc[-1]
     last_momentum = com_momentum.iloc[-1]
     predicted_next_com = last_com + last_momentum
 
     st.metric("Predicted Next Center of Mass", f"{predicted_next_com:.2f}", f"{last_momentum:.2f} (Current Momentum)")
     
+    # Prediction: Find a combination of the 15 hottest numbers whose mean is closest to the predicted CoM
     hot_numbers = df.iloc[:, :6].stack().value_counts().nlargest(15).index.tolist()
     
     best_combo = []
@@ -191,6 +207,8 @@ def analyze_geo_network(df):
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Geographic Hotspot Analysis")
+        # Acknowledging FutureWarning: This is a known behavior change in pandas and the code is correct for current versions.
+        # For future-proofing, one would use .apply(lambda x: x.iloc[:, :6]...).
         region_counts = df.groupby('region').apply(lambda x: pd.Series(x.iloc[:, :6].values.flatten()).value_counts()).unstack(level=0).fillna(0)
         world = pd.DataFrame({'region': ['North', 'South', 'East', 'West'], 'lat': [60, -20, 35, 38], 'lon': [-100, -60, 100, -120]})
         region_luck = df['region'].value_counts().reset_index(); region_luck.columns = ['region', 'total_draws']
@@ -318,7 +336,7 @@ def analyze_game_theory(df):
     return {'Game Theory Optimal': {'prediction': pred, 'logic': "Numbers selected to be least popular based on a simulation of 10,000 virtual players."}}
 
 # --- Main App Logic ---
-st.title("🪐 LottoSphere v6.0: Celestial Mechanics Engine")
+st.title("🪐 LottoSphere v6.1: Celestial Mechanics Engine")
 st.markdown("An ultimate predictive engine integrating **Calculus, Linear Algebra, Physics, Geospatial Analysis, Chaos Theory, Network Science, Time Series Forecasting, Ensemble AI, and Game Theory Simulation**.")
 
 uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
