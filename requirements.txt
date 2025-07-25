@@ -19,9 +19,6 @@ scipy==1.13.0
 # --- Machine Learning & Statistical Modeling ---
 scikit-learn==1.4.2
 statsmodels==0.14.2
-lightgbm==4.3.0
-xgboost==2.0.3
-prophet==1.1.5
 # Pinned TensorFlow and dependencies for numpy compatibility
 tensorflow==2.16.1
 protobuf==4.25.3
@@ -30,10 +27,7 @@ keras==3.3.3
 # --- Advanced Analysis & HPC ---
 umap-learn==0.5.6
 hdbscan==0.8.33
-shap==0.45.1
-numba==0.59.1
 pywavelets==1.5.0
-filterpy==1.4.5
 nolds==0.5.3
 
 # --- Deep Learning Backend (PyTorch) ---
@@ -42,14 +36,3 @@ torch==2.3.0
 # --- Visualization ---
 plotly==5.20.0
 matplotlib==3.8.4
-
-# --- Geospatial & Network (Optional but included for completeness) ---
-networkx==3.3
-folium==0.17.0
-streamlit-folium==0.22.0
-geopandas==0.14.4
-shapely==2.0.4
-
-# --- Reporting & Utilities ---
-reportlab==4.1.0
-requests
