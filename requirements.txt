@@ -1,5 +1,5 @@
 # ===================================================================
-# Requirements for LottoSphere X: The Oracle Ensemble v10.9
+# Requirements for LottoSphere v14.0: The Pattern Forecaster
 # ===================================================================
 
 # --- Core & Data Handling ---
@@ -17,15 +17,13 @@ torch
 filterpy
 pywavelets
 
-# --- Advanced Analysis & HPC ---
+# --- Advanced Analysis ---
 umap-learn
 hdbscan
 shap>=0.41.0
+numba
 
-# --- Visualization & Reporting ---
+# --- Visualization ---
 plotly
 matplotlib
 reportlab
-
-# --- Utility ---
-requests
