@@ -1,5 +1,5 @@
 # ===================================================================
-# Requirements for LottoSphere v9.1: Acausal Engine
+# Requirements for LottoSphere X: The Oracle Ensemble
 #
 # To install all dependencies, run:
 # pip install -r requirements.txt
@@ -13,9 +13,19 @@ scipy
 
 # --- Machine Learning & Statistical Modeling ---
 scikit-learn
-filterpy  # For Kalman Filter implementation
-pywavelets # NEW: For modern Wavelet Transform analysis
+lightgbm
+xgboost
+prophet
+torch
+filterpy  # For Kalman Filter
+pywavelets # For Wavelet Transform
 
-# --- Visualization ---
+# --- Advanced Analysis ---
+umap-learn
+hdbscan
+shap>=0.41.0
+
+# --- Visualization & Reporting ---
 plotly
 matplotlib
+reportlab
