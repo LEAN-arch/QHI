@@ -1,3 +1,10 @@
+# ===================================================================
+# Requirements for LottoSphere v9.0: Acausal Engine
+#
+# To install all dependencies, run:
+# pip install -r requirements.txt
+# ===================================================================
+
 # --- Core & Data Handling ---
 streamlit
 pandas
@@ -11,6 +18,7 @@ lightgbm
 xgboost
 prophet
 torch
+filterpy  # NEW: For Kalman Filter implementation
 
 # --- Advanced Analysis & HPC ---
 umap-learn
@@ -23,9 +31,6 @@ networkx
 simpy
 
 # --- Geospatial Analysis ---
-# Note: Installing geopandas can sometimes be tricky.
-# It's often best to use conda if you encounter issues with pip.
-# conda install -c conda-forge geopandas
 geopandas
 shapely
 folium
