@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 10.3.0 (Index Alignment Bug Fix)
+# VERSION: 10.4.0 (Definitive Index Alignment Fix)
 #
 # DESCRIPTION:
 # This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
@@ -15,11 +15,11 @@
 # historical accuracy, precision, and closeness) and provide uncertainty intervals for each
 # predicted number.
 #
-# VERSION 10.3.0 ENHANCEMENTS:
-# - CRITICAL FIX (KeyError): Resolved the fatal `KeyError` during backtesting. The error was
-#   caused by an index mismatch between the original data and the feature-engineered DataFrame
-#   (which is one row shorter due to lag features). The backtesting logic for the ensemble
-#   model has been re-architected to ensure proper index alignment, making the process robust.
+# VERSION 10.4.0 ENHANCEMENTS:
+# - CRITICAL FIX (KeyError): Resolved the fatal `KeyError` during backtesting by implementing
+#   a robust index alignment strategy. The code now aligns the feature and label DataFrames
+#   based on the intersection of their indices, which is the industry-standard method for
+#   preventing such errors in time-series feature engineering.
 # =================================================================================================
 
 import streamlit as st
@@ -67,14 +67,17 @@ def load_data(uploaded_file):
     df.dropna(inplace=True)
     
     unique_counts = df.apply(lambda row: len(set(row)), axis=1)
-    valid_rows_mask = (unique_counts == 6)
+    valid_rows_mask = (unique_counts == df.shape[1])
     
     if not valid_rows_mask.all():
         st.warning(f"Data integrity issue found. Discarded {len(df) - valid_rows_mask.sum()} rows with duplicate numbers.")
-        df = df[valid_rows_mask]
+        df = df[valid_rows_mask].reset_index(drop=True)
+
+    if df.shape[1] > 6:
+        df = df.iloc[:, :6]
 
     sorted_values = np.sort(df.values, axis=1)
-    df = pd.DataFrame(sorted_values, columns=[f'Number {i+1}' for i in range(6)])
+    df = pd.DataFrame(sorted_values, columns=[f'Number {i+1}' for i in range(df.shape[1])])
     
     return df.astype(int)
 
@@ -177,7 +180,11 @@ def train_ensemble_models(_df):
     features = feature_engineering(_df)
     X = features.iloc[:-1]
     y = _df.loc[X.index].shift(-1).dropna().iloc[:, :6]
-    X = X.loc[y.index]
+    
+    # Robust index alignment
+    common_index = X.index.intersection(y.index)
+    X = X.loc[common_index]
+    y = y.loc[common_index]
     
     lgb_median = [lgb.LGBMRegressor(objective='quantile', alpha=0.5, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)]
     lgb_lower = [lgb.LGBMRegressor(objective='quantile', alpha=0.15, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)]
@@ -239,18 +246,20 @@ def backtest_and_score(df):
         final_pred_obj['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
         scored_predictions.append(final_pred_obj)
             
-    # --- Special handling for ensemble model ---
+    # --- Special handling for ensemble model with DEFINITIVE FIX ---
     ensemble_models = train_ensemble_models(df)
     ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
     
-    # CRITICAL FIX: Correctly align features and labels for ensemble backtesting
     features_full = feature_engineering(df)
-    # The true values (y) start from the second row of the original df, aligned with the first row of features
-    y_true_full = df.iloc[1:, :6] 
-    # Align the features with these true values
-    features_aligned = features_full.loc[y_true_full.index]
+    y_true_full = df.shift(-1).dropna().iloc[:, :6]
     
-    _, X_test, _, y_test = train_test_split(features_aligned, y_true_full, test_size=0.2, shuffle=False)
+    # CRITICAL FIX: Align features and labels by their common index intersection
+    common_index = features_full.index.intersection(y_true_full.index)
+    features_aligned = features_full.loc[common_index]
+    y_true_aligned = y_true_full.loc[common_index]
+
+    # Now split the perfectly aligned data
+    _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
     
     y_preds_ensemble = []
     for i in range(len(X_test)):
@@ -259,14 +268,21 @@ def backtest_and_score(df):
     
     y_trues_ensemble = y_test.values.tolist()
     
-    accuracy = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble)
-    precision = sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble)
-    rmse = np.sqrt(mean_squared_error(y_trues_ensemble, y_preds_ensemble))
-    acc_score = min(100, (accuracy / 1.2) * 100)
-    prec_score = min(100, (precision / 0.1) * 100)
-    rmse_score = max(0, 100 - (rmse / 20.0) * 100)
-    ensemble_pred_final['likelihood'] = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
-    ensemble_pred_final['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
+    if y_trues_ensemble:
+        accuracy = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble)
+        precision = sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble)
+        rmse = np.sqrt(mean_squared_error(y_trues_ensemble, y_preds_ensemble))
+        
+        acc_score = min(100, (accuracy / 1.2) * 100)
+        prec_score = min(100, (precision / 0.1) * 100)
+        rmse_score = max(0, 100 - (rmse / 20.0) * 100)
+        
+        ensemble_pred_final['likelihood'] = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
+        ensemble_pred_final['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
+    else:
+        ensemble_pred_final['likelihood'] = 0
+        ensemble_pred_final['metrics'] = {'Avg Hits': "N/A", '3+ Hit Rate': "N/A", 'RMSE': "N/A"}
+        
     scored_predictions.append(ensemble_pred_final)
 
     return sorted(scored_predictions, key=lambda x: x['likelihood'], reverse=True)
@@ -282,46 +298,47 @@ uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
 
 if uploaded_file:
     df_master = load_data(uploaded_file)
-    st.sidebar.success(f"Loaded {len(df_master)} valid historical draws.")
-    
-    if st.sidebar.button("💠 ENGAGE ORACLE ENSEMBLE", type="primary", use_container_width=True):
+    if df_master.shape[1] == 6:
+        st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
-        # Run backtesting and scoring on the full dataset
-        with st.spinner("Backtesting all models and calculating Likelihood Scores... This may take a few minutes."):
-            scored_predictions = backtest_and_score(df_master)
-        
-        st.header("✨ Final Synthesis & Strategic Portfolio")
-        st.markdown("The Oracle has completed all analyses. Below is the final consensus and the ranked predictions from each model, complete with quantified uncertainty and a **Likelihood Score** based on historical performance.")
-        
-        if scored_predictions:
-            # Create Hybrid Consensus Prediction
-            consensus_numbers = []
-            for p in scored_predictions:
-                weight = int(p['likelihood'] / 10) if p['likelihood'] > 0 else 1
-                consensus_numbers.extend(p['prediction'] * weight)
-            consensus_counts = Counter(consensus_numbers)
-            hybrid_pred = sorted([num for num, count in consensus_counts.most_common(6)])
-            hybrid_error = np.mean([p['error'] for p in scored_predictions], axis=0)
+        if st.sidebar.button("💠 ENGAGE ORACLE ENSEMBLE", type="primary", use_container_width=True):
+            
+            with st.spinner("Backtesting all models and calculating Likelihood Scores... This may take a few minutes."):
+                scored_predictions = backtest_and_score(df_master)
+            
+            st.header("✨ Final Synthesis & Strategic Portfolio")
+            st.markdown("The Oracle has completed all analyses. Below is the final consensus and the ranked predictions from each model, complete with quantified uncertainty and a **Likelihood Score** based on historical performance.")
+            
+            if scored_predictions:
+                consensus_numbers = []
+                for p in scored_predictions:
+                    weight = int(p['likelihood'] / 10) if p['likelihood'] > 0 else 1
+                    consensus_numbers.extend(p['prediction'] * weight)
+                consensus_counts = Counter(consensus_numbers)
+                hybrid_pred = sorted([num for num, count in consensus_counts.most_common(6)])
+                hybrid_error = np.mean([p['error'] for p in scored_predictions], axis=0)
 
-            st.subheader("🏆 Prime Candidate: Hybrid Consensus")
-            st.markdown("The numbers that appeared most frequently across all models, weighted by each model's historical **Likelihood Score**.")
-            
-            pred_str_hybrid = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(hybrid_pred, hybrid_error)])
-            st.success(f"## `{pred_str_hybrid}`")
-            
-            st.subheader("Ranked Predictions by Model Performance")
-            
-            for p in scored_predictions:
-                with st.container(border=True):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.markdown(f"#### {p['name']}")
-                        pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
-                        st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
-                        st.caption(f"**Logic:** {p['logic']}")
-                    with col2:
-                        st.metric("Likelihood Score", f"{p['likelihood']:.1f}%", help=f"Based on Backtest Metrics: {p['metrics']}")
-        else:
-            st.error("Could not generate scored predictions. The dataset may be too small for backtesting.")
+                st.subheader("🏆 Prime Candidate: Hybrid Consensus")
+                st.markdown("The numbers that appeared most frequently across all models, weighted by each model's historical **Likelihood Score**.")
+                
+                pred_str_hybrid = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(hybrid_pred, hybrid_error)])
+                st.success(f"## `{pred_str_hybrid}`")
+                
+                st.subheader("Ranked Predictions by Model Performance")
+                
+                for p in scored_predictions:
+                    with st.container(border=True):
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"#### {p['name']}")
+                            pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
+                            st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
+                            st.caption(f"**Logic:** {p['logic']}")
+                        with col2:
+                            st.metric("Likelihood Score", f"{p['likelihood']:.1f}%", help=f"Based on Backtest Metrics: {p['metrics']}")
+            else:
+                st.error("Could not generate scored predictions. The dataset may be too small for backtesting.")
+    else:
+        st.error(f"Invalid data format. After cleaning, the file does not have 6 number columns. Please check the input file.")
 else:
     st.info("Upload a CSV file to engage the Oracle Ensemble.")
