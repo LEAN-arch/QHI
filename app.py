@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 15.3.2 (Debugged & Optimized with Kalman Filter Fix)
+# VERSION: 15.3.3 (Debugged & Optimized with Kalman Filter Dimension Fix)
 #
 # DESCRIPTION:
 # A hybrid intelligence platform unifying Acausal Physics and Stochastic AI for lottery predictions.
@@ -72,6 +72,9 @@ def load_data(uploaded_file):
         if df.shape[1] > 6:
             df = df.iloc[:, :6]
         df.columns = [f'Number {i+1}' for i in range(df.shape[1])]
+        if len(df) < 10:
+            st.session_state.data_warning = "Insufficient data (fewer than 10 rows). Please provide more historical draws."
+            return pd.DataFrame()
         return df.astype(int)
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
@@ -109,16 +112,20 @@ def feature_engineering(_df):
 @st.cache_data
 def analyze_quantum_fluctuations(_df):
     try:
-        # Kalman filter-based prediction with 2D state space (number and velocity)
+        if _df.empty or len(_df) < 2:
+            raise ValueError("Insufficient data for Kalman filter analysis")
+        
+        # Kalman filter with 2D state and measurement spaces
         max_num = _df.iloc[:, :6].values.max()
         predictions = []
         for col in _df.iloc[:, :6].columns:
-            kf = KalmanFilter(dim_x=2, dim_z=1)  # 2D state: [number, velocity]
+            kf = KalmanFilter(dim_x=2, dim_z=2)  # 2D state: [number, velocity], 2D measurement: [number, diff_from_mean]
+            mean_num = _df[col].mean()
             kf.x = np.array([[_df[col].iloc[-1]], [0]])  # Initial state: last number, zero velocity
             kf.F = np.array([[1, 1], [0, 1]])  # State transition: x_t+1 = x_t + v_t, v_t+1 = v_t
-            kf.H = np.array([[1, 0]])  # Measurement: observe only the number
+            kf.H = np.array([[1, 0], [1, 0]])  # Measurement: observe number and diff_from_mean
             kf.P *= 1000  # Initial uncertainty
-            kf.R = 5  # Measurement noise
+            kf.R = np.array([[5, 0], [0, 5]])  # Measurement noise
             kf.Q = Q_discrete_white_noise(dim=2, dt=1, var=0.1)  # Process noise
             
             n_boots = 50
@@ -127,22 +134,32 @@ def analyze_quantum_fluctuations(_df):
                 sample_df = _df[[col]].sample(frac=0.8, replace=True)
                 kf.x = np.array([[sample_df[col].iloc[-1]], [0]])
                 for z in sample_df[col].values:
+                    diff_from_mean = z - mean_num
                     kf.predict()
-                    kf.update(z)
+                    kf.update(np.array([[z], [diff_from_mean]]))
                 boot_preds.append(int(round(kf.x[0][0])))
             prediction = int(round(np.mean(boot_preds)))
             error = np.std(boot_preds)
             predictions.append((prediction, error))
         
-        # Sort predictions and extract top 6
+        # Ensure unique predictions and select top 6
         predictions.sort(key=lambda x: x[0])
-        final_predictions = [p[0] for p in predictions[:6]]
-        final_errors = [p[1] for p in predictions[:6]]
+        unique_preds = []
+        seen = set()
+        for pred, err in predictions:
+            if pred not in seen and len(unique_preds) < 6:
+                unique_preds.append((pred, err))
+                seen.add(pred)
+        while len(unique_preds) < 6:
+            unique_preds.append((0, 0))  # Fallback if insufficient unique predictions
+        
+        final_predictions = [p[0] for p in unique_preds[:6]]
+        final_errors = [p[1] for p in unique_preds[:6]]
         return {
             'name': 'Quantum Fluctuation',
-            'prediction': final_predictions,
+            'prediction': sorted(final_predictions),
             'error': final_errors,
-            'logic': 'Kalman filter-based tracking of number trends with velocity.'
+            'logic': 'Kalman filter-based tracking of number trends with velocity and difference from mean.'
         }
     except Exception as e:
         st.error(f"Error in quantum fluctuations: {str(e)}")
@@ -424,7 +441,7 @@ def run_full_backtest_suite(df):
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("🌌 LottoSphere v15.3.2: The Grand Unification Engine")
+st.title("🌌 LottoSphere v15.3.3: The Grand Unification Engine")
 st.markdown("A hybrid intelligence platform that unifies **Acausal Physics** and **Stochastic AI** models to generate a portfolio of optimal, uncertainty-quantified predictions.")
 
 if 'data_warning' not in st.session_state:
