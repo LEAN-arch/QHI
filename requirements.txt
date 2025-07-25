@@ -1,38 +1,23 @@
-# ===================================================================
-# Requirements for LottoSphere v16.1: The Quantum Chronodynamics Engine
-#
-# This file contains fully pinned versions to resolve all dependency conflicts.
-# CRITICAL FIX: Adds the missing 'nolds' library.
-# CRITICAL FIX: Pins numpy to v1.26.4, compatible with numba and tensorflow.
-# CRITICAL FIX: Pins tensorflow and its dependencies to resolve installation conflicts.
-#
-# To install all dependencies, run:
-# pip install -r requirements.txt
-# ===================================================================
 
-# --- Core & Data Handling ---
-streamlit==1.35.0
+# requirements.txt for LottoSphere v16.0.1
+# Compatible with Python 3.11
+# Install with: pip install -r requirements.txt
+
+streamlit==1.29.0
 pandas==2.2.2
 numpy==1.26.4
-scipy==1.13.0
-
-# --- Machine Learning & Statistical Modeling ---
-scikit-learn==1.4.2
-statsmodels==0.14.2
-# Pinned TensorFlow and dependencies for numpy compatibility
-tensorflow==2.16.1
-protobuf==4.25.3
-keras==3.3.3
-
-# --- Advanced Analysis & HPC ---
+plotly==5.24.0
+matplotlib==3.9.2
+scikit-learn==1.5.2
 umap-learn==0.5.6
 hdbscan==0.8.33
-pywavelets==1.5.0
-nolds==0.5.3
+pywavelets==1.7.0
+scipy==1.14.1
+nolds==0.5.2
+torch==2.2.2
 
-# --- Deep Learning Backend (PyTorch) ---
-torch==2.3.0
-
-# --- Visualization ---
-plotly==5.20.0
-matplotlib==3.8.4
+# Notes:
+# - For GPU support, install PyTorch with CUDA manually, e.g.:
+#   pip install torch==2.2.2+cu118 -f https://download.pytorch.org/whl/torch_stable.html
+#   (Adjust CUDA version based on your system: cu118 for CUDA 11.8, cu121 for CUDA 12.1, etc.)
+# - Ensure Python 3.11 is used for compatibility.
