@@ -1,29 +1,42 @@
 # ===================================================================
-# Requirements for LottoSphere v14.0: The Pattern Forecaster
+# Requirements for LottoSphere v16.0: The Quantum Chronodynamics Engine
+#
+# This file contains pinned versions for all advanced libraries to ensure
+# a stable and reproducible environment.
+#
+# To install all dependencies, run:
+# pip install -r requirements.txt
 # ===================================================================
 
 # --- Core & Data Handling ---
-streamlit
-pandas
-numpy
-scipy
+streamlit==1.35.0
+pandas==2.2.2
+numpy==1.26.4
 
 # --- Machine Learning & Statistical Modeling ---
-scikit-learn
-statsmodels
-lightgbm
-prophet
-torch
-filterpy
-pywavelets
+scikit-learn==1.4.2
+scipy==1.13.0
+statsmodels==0.14.2
+lightgbm==4.3.0
+xgboost==2.0.3
+prophet==1.1.5
+torch==2.3.0
 
-# --- Advanced Analysis ---
-umap-learn
-hdbscan
-shap>=0.41.0
-numba
+# --- Advanced Analysis & HPC ---
+umap-learn==0.5.6
+hdbscan==0.8.33
+shap==0.45.1
+numba==0.59.1
+pywavelets==1.5.0
+filterpy==1.4.5
+nolds==0.5.3
 
 # --- Visualization ---
-plotly
-matplotlib
-reportlab
+plotly==5.20.0
+matplotlib==3.8.4
+folium==0.17.0
+streamlit-folium==0.22.0
+
+# --- Reporting & Utilities ---
+reportlab==4.1.0
+requests
