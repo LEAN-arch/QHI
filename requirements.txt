@@ -1,37 +1,29 @@
 # ===================================================================
-# Requirements for LottoSphere X: The Oracle Ensemble v10.1
-#
-# This file contains pinned versions to resolve critical dependency conflicts.
-# The primary fix is pinning numpy to a version compatible with numba,
-# which is a dependency for umap-learn and hdbscan.
-#
-# To install all dependencies, run:
-# pip install -r requirements.txt
+# Requirements for LottoSphere X: The Oracle Ensemble v10.2
 # ===================================================================
 
 # --- Core & Data Handling ---
-streamlit==1.35.0
-pandas==2.2.2
-numpy==1.26.4
-scipy==1.13.0
+streamlit
+pandas
+numpy
+scipy
 
 # --- Machine Learning & Statistical Modeling ---
-scikit-learn==1.4.2
-statsmodels==0.14.2
-lightgbm==4.3.0
-xgboost==2.0.3
-prophet==1.1.5
-torch==2.3.0
-filterpy==1.4.5
-pywavelets==1.5.0
+scikit-learn
+statsmodels
+lightgbm
+xgboost
+prophet
+torch
+filterpy
+pywavelets
 
-# --- Advanced Analysis & HPC ---
-umap-learn==0.5.6
-hdbscan==0.8.33
-shap==0.45.1
-numba==0.59.1
+# --- Advanced Analysis ---
+umap-learn
+hdbscan
+shap>=0.41.0
 
 # --- Visualization & Reporting ---
-plotly==5.20.0
-matplotlib==3.8.4
-reportlab==4.1.0
+plotly
+matplotlib
+reportlab
