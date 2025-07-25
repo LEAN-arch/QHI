@@ -1,18 +1,20 @@
-# =================================================================================================
-# LottoSphere v16.0.2: The Quantum Chronodynamics Engine
+# ======================================================================================================
+# LottoSphere v16.0.3: The Quantum Chronodynamics Engine
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-25
-# VERSION: 16.0.2 (Debugged, Optimized with Periodicity Analysis and Position-Specific Max Numbers)
+# VERSION: 16.0.3 (Debugged, Optimized with Periodicity Analysis, Position-Specific Max Numbers,
+#                  and Detailed Explanation in UI)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
 # data, framed around lottery number sets. Models each of six sorted number positions as an
 # independent yet interacting dynamical system. Integrates deep learning, statistical physics,
 # chaos theory, and quantum-inspired methods with a robust metrology suite.
-# Enhanced with periodicity analysis for non-positive Lyapunov exponents and position-specific
-# maximum numbers based on sequence length (3 to 6).
-# =================================================================================================
+# Enhanced with periodicity analysis for non-positive Lyapunov exponents, position-specific
+# maximum numbers based on sequence length (3 to 6), and a detailed explanation of results
+# and plots in the System Dynamics Explorer tab.
+# ======================================================================================================
 
 import streamlit as st
 import pandas as pd
@@ -21,7 +23,6 @@ import io
 import plotly.express as px
 import plotly.graph_objects as go
 from collections import Counter
-from itertools import combinations
 import matplotlib.pyplot as plt
 import warnings
 
@@ -48,7 +49,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.2: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.3: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -56,9 +57,9 @@ np.random.seed(42)
 torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# =================================================================================================
+# ====================================================================================================
 # ALL FUNCTION DEFINITIONS
-# =================================================================================================
+# ====================================================================================================
 
 # --- 2. CORE UTILITIES & DATA HANDLING ---
 @st.cache_data
@@ -79,7 +80,7 @@ def load_data(uploaded_file, max_nums):
         
         # Check for duplicates within rows
         num_cols = df.shape[1]
-        unique_counts = df.apply(lambda row: len(set(row)), axis=1)
+        unique_counts = df.apply(lambda x: len(set(x)), axis=1)
         valid_rows_mask = (unique_counts == num_cols)
         if not valid_rows_mask.all():
             st.session_state.data_warning = f"Data integrity issue. Discarded {len(df) - valid_rows_mask.sum()} rows with duplicate/missing numbers."
@@ -502,11 +503,11 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
         st.error(f"Error in predictive maturity analysis: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# =================================================================================================
+# ====================================================================================================
 # Main Application UI & Logic
-# =================================================================================================
+# ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.2: The Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.3: The Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical and AI techniques.")
 
 if 'data_warning' not in st.session_state:
@@ -573,6 +574,126 @@ if uploaded_file:
         with tab2:
             st.header("System Dynamics Explorer")
             st.markdown("Explore the intrinsic, time-dependent behavior of the number system.")
+            
+            # Add detailed explanation of results and plots
+            with st.expander("Explanation of Results and Plots"):
+                st.markdown("""
+                ### Overview
+                The System Dynamics Explorer analyzes the temporal behavior of a selected position (e.g., Pos_1, the smallest number in each draw) as a dynamical system. It provides insights into whether the time series is chaotic, stable, or periodic, which is critical for understanding the underlying dynamics of the lottery system. The analysis includes four main outputs:
+
+                - **Recurrence Plot**: Visualizes when the time series revisits similar states.
+                - **Power Spectral Density (Fourier Analysis)**: Identifies dominant frequencies (cycles) in the time series.
+                - **Continuous Wavelet Transform**: Reveals how frequencies evolve over time.
+                - **Lyapunov Exponent and Periodicity Analysis**: Quantifies chaos (or stability) and detects periodic cycles when the system is stable or periodic.
+
+                These outputs help assess whether the position’s numbers are predictable, cyclic, or chaotic, informing strategies for number selection or further analysis.
+
+                ### Detailed Explanation of Each Result
+
+                #### 1. Recurrence Plot
+                **Description**:
+                - A square heatmap where each point \([i, j]\) shows the absolute difference between the values at draws \(i\) and \(j\), normalized to [0, 1]. Darker colors indicate similar values (recurrence of states), while lighter colors show dissimilar states.
+                - **Example**: For 1000 draws, a 1000x1000 heatmap with dark diagonal lines suggests repeated patterns.
+
+                **Significance**:
+                - **Patterns**: Diagonal lines parallel to the main diagonal (where \(i = j\)) indicate periodic behavior, as the same numbers reappear at regular intervals. A checkerboard pattern suggests quasi-periodicity, while a noisy plot indicates chaotic or random behavior.
+                - **In Lottery**: Reveals whether numbers in the selected position (e.g., Pos_1 = 3) recur predictably. Long diagonal lines suggest a cycle, useful for anticipating reappearances.
+                - **Limitations**: Sensitive to noise in lottery data, which may obscure patterns. Requires sufficient data (≥50 draws) for meaningful recurrences.
+
+                **Actionability**:
+                - **Periodic Behavior**: If diagonal lines appear every 10 draws, hypothesize a 10-draw cycle. Prioritize numbers that appeared 10 draws ago for Pos_1.
+                - **Chaotic Behavior**: A noisy plot suggests unpredictability. Rely on Predictive Analytics (Tab 1) models like LSTM/GRU instead of cycle-based strategies.
+                - **Next Steps**: Confirm cycles with Periodicity Analysis. Collect more data if patterns are unclear.
+
+                #### 2. Power Spectral Density (Fourier Analysis)
+                **Description**:
+                - A line plot showing the power (strength) of different frequencies in the time series. The x-axis is frequency (cycles per draw), and the y-axis is power. Peaks indicate dominant cycles.
+                - **Example**: A peak at 0.1 cycles/draw suggests a cycle every \(1/0.1 = 10\) draws.
+
+                **Significance**:
+                - **Frequencies**: Peaks show cycle lengths. A peak at 0.05 cycles/draw means a 20-draw cycle, suggesting Pos_1 numbers may repeat every 20 draws.
+                - **In Lottery**: Helps identify cyclic patterns for number selection based on cycle timing.
+                - **Limitations**: Assumes stationarity, which lottery data may violate due to randomness. Short datasets (<100 draws) may produce noisy results.
+
+                **Actionability**:
+                - **Cycle Detection**: Note the top 2–3 peaks and compute periods (period = \(1/\text{frequency}\)). For a peak at 0.1, expect a 10-draw cycle. Select numbers from 10 draws ago.
+                - **Validation**: Compare with Periodicity Analysis and Wavelet Transform. If no peaks, rely on Tab 1 models.
+                - **Next Steps**: Analyze recent draws to align predictions with the cycle. Adjust analysis parameters (e.g., increase frequency resolution) for clearer peaks if data allows.
+
+                #### 3. Continuous Wavelet Transform
+                **Description**:
+                - A heatmap showing time-frequency patterns. The x-axis is time (draw indices), the y-axis is scale (inversely related to frequency), and color intensity shows the strength of periodic signals.
+                - **Example**: A bright band at scale 10 around draw 500 indicates a strong 10-draw cycle at that time.
+
+                **Significance**:
+                - **Time-Frequency Insight**: Unlike Fourier, it captures non-stationary behavior, showing when cycles appear or vanish.
+                - **In Lottery**: Bright bands indicate periods when Pos_1 numbers recur cyclically, guiding predictions based on active cycles.
+                - **Limitations**: Computationally intensive for large datasets (>1000 draws). Noisy for short series. Assumes smooth oscillations, which may miss abrupt changes.
+
+                **Actionability**:
+                - **Cycle Timing**: Identify bright bands and their scales (e.g., scale 10 ≈ 10 draws). If recent draws are in a bright region, prioritize numbers from recent cycles.
+                - **Dynamic Adjustments**: Focus on recent data if cycles are time-specific (e.g., draws 200–300).
+                - **Next Steps**: Correlate with Fourier and Periodicity Analysis. Adjust scale range for faster computation if needed.
+
+                #### 4. Lyapunov Exponent and Periodicity Analysis
+                **Description**:
+                - **Lyapunov Exponent**: Measures chaos. Positive values indicate chaotic behavior (sensitivity to initial conditions); non-positive (≤0) suggest stability or periodicity.
+                - **Periodicity Analysis**: For non-positive Lyapunov, an autocorrelation function (ACF) plot shows correlations at different lags. Peaks above 0.2 indicate periods (e.g., a peak at lag 8 suggests an 8-draw cycle).
+                - **Example**: Lyapunov = -0.0123 (stable), ACF peak at lag 8 with description: “Periodicity with a dominant period of approximately 8 draws.”
+
+                **Significance**:
+                - **Lyapunov**:
+                  - **Positive**: Chaotic system, unpredictable. Use robust models (Tab 1).
+                  - **Non-positive**: Stable or periodic, allowing cycle-based predictions.
+                - **Periodicity**:
+                  - A peak at lag 8 indicates an 8-draw cycle for Pos_1 numbers.
+                  - No peaks suggest stability without clear cycles.
+                - **In Lottery**: A stable system with a period (e.g., 8 draws) enables predictions based on cycle timing. Chaotic systems require diversified models.
+
+                **Actionability**:
+                - **Chaotic (Positive Lyapunov)**:
+                  - Avoid cycle-based predictions. Use Tab 1 (LSTM/GRU/Hilbert) for robust forecasts.
+                  - Next: Focus on Predictive Analytics.
+                - **Stable/Periodic (Non-positive Lyapunov)**:
+                  - If period detected (e.g., 8 draws), select Pos_1 numbers from 8 draws ago. If Pos_1 was 5 then, consider 5.
+                  - No period: Use frequency analysis (e.g., most common Pos_1 numbers).
+                  - Next: Confirm period with Fourier/Wavelet. Test cycle-based predictions in Tab 1.
+                - **ACF Plot**:
+                  - Peaks above red lines (0.2) indicate periodicity. Use lag (e.g., 8) to predict based on past draws.
+                  - No peaks: Rely on other analyses or Tab 1.
+                - **Limitations**: Lyapunov is noise-sensitive; ACF assumes stationarity. Use multiple analyses for confirmation.
+
+                ### Integrated Interpretation
+                **Combining Results**:
+                - **Coherent Patterns**: If Recurrence shows diagonal lines, Fourier shows a peak (e.g., 0.1 cycles/draw), Wavelet shows a band at scale 10, and Periodicity confirms a 10-draw cycle, Pos_1 is periodic. Predict based on 10-draw cycles.
+                - **Chaotic Signals**: Noisy Recurrence, flat Fourier, scattered Wavelet, and positive Lyapunov suggest chaos. Use Tab 1 models.
+                - **Mixed Signals**: Negative Lyapunov but no ACF peaks may indicate stability without periodicity or insufficient data. Collect more draws.
+
+                **Significance in Lottery**:
+                - Positional analysis (e.g., Pos_1) can reveal patterns due to sorting. This tab quantifies predictability, guiding cycle-based or model-based strategies.
+
+                **Actionable Strategy**:
+                1. **Check Lyapunov**:
+                   - Positive: Use Tab 1 predictions.
+                   - Non-positive: Proceed to Periodicity and cross-check with Fourier/Wavelet.
+                2. **Analyze Periodicity**:
+                   - Use ACF to identify period (e.g., 8 draws). Select numbers from 8 draws ago.
+                   - No period: Prioritize frequent Pos_1 numbers.
+                3. **Cross-Validate**:
+                   - Confirm period with Fourier (peak at \(1/\text{period}\)) and Wavelet (band at scale ≈ period).
+                   - Check Recurrence for cycle consistency.
+                4. **Integrate**:
+                   - Combine cycle candidates with Tab 1 predictions.
+                   - Use Tab 3 to validate cycle reliability with more data.
+                5. **Iterate**:
+                   - Test predictions against new draws. Adjust strategy if cycles fail.
+
+                ### Technical Notes
+                - **Data**: Requires ≥50 draws. Longer series (>100) improve Periodicity reliability.
+                - **Parameters**: Adjust ACF threshold (0.2), Fourier resolution, or Wavelet scales if needed.
+                - **Performance**: Large datasets (>1000 draws) may slow Recurrence/Wavelet. Optimize by reducing scales or subsampling.
+                """)
+
             position = st.selectbox("Select Position", options=df_master.columns, index=0)
             if st.button("ANALYZE DYNAMICS"):
                 with st.spinner("Calculating system dynamics..."):
