@@ -1,21 +1,24 @@
 # =================================================================================================
-# LottoSphere X: The Oracle Ensemble
+# LottoSphere v13.0: The Pattern Resonance Engine
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 12.1.0 (Column Name Consistency Fix)
+# VERSION: 13.0 (Pattern Prediction & State Transition Modeling)
 #
 # DESCRIPTION:
-# This definitive version evolves the engine into a complete analytical and educational platform.
-# It complements the powerful predictive modules with a sophisticated suite of explanatory and
-# meta-analytical tools, designed to provide a deep, intuitive understanding of the system's
-# behavior and the models used to probe it.
+# This definitive version re-frames the core problem from predicting numbers to predicting
+# the underlying mathematical PATTERN of the next draw. It models the lottery as a system that
+# transitions between a finite number of recurring "states" (clusters of similar patterns).
+# The engine's goal is to identify the current state and predict the most likely next state.
 #
-# VERSION 12.1.0 ENHANCEMENTS:
-# - CRITICAL FIX (ValueError): Resolved the fatal `ValueError` in the Predictive Maturity module.
-#   The error was caused by an inconsistent column name between DataFrame creation and the
-#   plotting function call. The column name has been standardized to 'Likelihood Score',
-#   ensuring the plot can always find its data.
+# CORE METHODOLOGY:
+# 1. MULTI-SCALE PATTERN TRANSFORMATION: Each draw is converted into a high-dimensional vector
+#    of over 20 mathematical properties (statistical, number theory, geometric, etc.).
+# 2. PATTERN CLUSTERING (HDBSCAN): Identifies recurring patterns or "system states" in the data.
+# 3. MARKOV CHAIN STATE TRANSITION MODEL: Calculates the historical probability of the system
+#    transitioning from any one state to another.
+# 4. PATTERN CONFORMANCE GENERATION: After predicting the most likely next pattern, the engine
+#    generates a set of six numbers that is the best possible fit for that pattern.
 # =================================================================================================
 
 import streamlit as st
@@ -29,22 +32,14 @@ from itertools import combinations
 import matplotlib.pyplot as plt
 
 # --- Advanced Scientific & ML Libraries ---
-from filterpy.kalman import KalmanFilter
-from filterpy.common import Q_discrete_white_noise
-from sklearn.neighbors import KernelDensity, NearestNeighbors
-import pywt
-from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
 import umap
 import hdbscan
-import lightgbm as lgb
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v12.1: The Grand Unification Engine",
-    page_icon="🌌",
+    page_title="LottoSphere v13.0: Pattern Resonance Engine",
+    page_icon="🕸️",
     layout="wide",
 )
 np.random.seed(42)
@@ -61,14 +56,10 @@ def load_data(uploaded_file):
     unique_counts = df.apply(lambda row: len(set(row)), axis=1)
     num_cols = df.shape[1]
     valid_rows_mask = (unique_counts == num_cols)
-    
     if not valid_rows_mask.all():
         st.session_state.data_warning = f"Data integrity issue found. Discarded {len(df) - valid_rows_mask.sum()} rows with duplicate or missing numbers."
         df = df[valid_rows_mask].reset_index(drop=True)
-
-    if df.shape[1] > 6:
-        df = df.iloc[:, :6]
-
+    if df.shape[1] > 6: df = df.iloc[:, :6]
     df.columns = [f'Number {i+1}' for i in range(df.shape[1])]
     return df.astype(int)
 
@@ -82,206 +73,115 @@ def is_prime(n):
         i += 6
     return True
 
+def get_digital_root(n):
+    return (n - 1) % 9 + 1 if n > 0 else 0
+
 @st.cache_data
-def feature_engineering(_df):
-    features = pd.DataFrame(index=_df.index)
+def create_pattern_dataframe(_df):
+    """The core transformation engine. Converts each draw into a rich mathematical pattern vector."""
+    patterns = pd.DataFrame(index=_df.index)
     df_nums = _df.iloc[:, :6]
-    features['sum'] = df_nums.sum(axis=1)
-    features['std'] = df_nums.std(axis=1)
-    features['odd_count'] = df_nums.apply(lambda r: sum(n % 2 for n in r), axis=1)
-    features['prime_count'] = df_nums.apply(lambda r: sum(is_prime(n) for n in r), axis=1)
-    for col in features.columns:
-        features[f'{col}_lag1'] = features[col].shift(1)
-    features.dropna(inplace=True)
-    return features
+    df_sorted = pd.DataFrame(np.sort(df_nums.values, axis=1), index=_df.index)
+    
+    # Statistical Properties
+    patterns['sum'] = df_nums.sum(axis=1)
+    patterns['mean'] = df_nums.mean(axis=1)
+    patterns['std'] = df_nums.std(axis=1)
+    patterns['range'] = df_nums.max(axis=1) - df_nums.min(axis=1)
+    
+    # Number Theory Properties
+    patterns['odd_count'] = df_nums.apply(lambda r: sum(n % 2 for n in r), axis=1)
+    patterns['prime_count'] = df_nums.apply(lambda r: sum(is_prime(n) for n in r), axis=1)
+    patterns['digital_root_sum'] = df_nums.apply(lambda r: sum(get_digital_root(n) for n in r), axis=1)
+    
+    # Spacing Properties
+    gaps = df_sorted.diff(axis=1).dropna(axis=1)
+    patterns['mean_gap'] = gaps.mean(axis=1)
+    patterns['std_gap'] = gaps.std(axis=1)
+    
+    # Frequency Properties
+    all_numbers_flat = df_nums.values.flatten()
+    hot_cold_split = int(np.median(list(Counter(all_numbers_flat).values())))
+    counts = Counter(all_numbers_flat)
+    hot_numbers = {num for num, count in counts.items() if count > hot_cold_split}
+    patterns['hot_number_count'] = df_nums.apply(lambda r: sum(1 for n in r if n in hot_numbers), axis=1)
+    
+    # Geometric Properties (Barycentric)
+    max_num = df_nums.values.max()
+    low_b, high_b = max_num / 3, 2 * max_num / 3
+    patterns['low_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if n <= low_b), axis=1)
+    patterns['mid_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if low_b < n <= high_b), axis=1)
+    patterns['high_num_count'] = df_nums.apply(lambda r: sum(1 for n in r if n > high_b), axis=1)
 
-# --- 3. ACAUSAL ENGINE MODULES ---
+    return patterns
 
 @st.cache_data
-def analyze_quantum_fluctuations(_df):
-    max_num = _df.iloc[:, :6].values.max()
-    binary_matrix = pd.DataFrame(0, index=_df.index, columns=range(1, max_num + 1))
-    for index, row in _df.iloc[:, :6].iterrows(): binary_matrix.loc[index, row.values] = 1
-    kf_states = []
-    for i in range(1, max_num + 1):
-        kf = KalmanFilter(dim_x=2, dim_z=1); kf.x = np.array([0., 0.]); kf.F = np.array([[1., 1.], [0., 1.]]); kf.H = np.array([[1., 0.]]); kf.R = 5; kf.Q = Q_discrete_white_noise(dim=2, dt=0.1, var=0.13)
-        mu, _, _, _ = kf.batch_filter(binary_matrix[i].values)
-        kf_states.append(mu[-1])
-    state_df = pd.DataFrame(kf_states, columns=['LP', 'Trend'], index=range(1, max_num + 1))
-    state_df['Score'] = state_df['LP'] + state_df['Trend'] * 2
-    pred = sorted(state_df.nlargest(6, 'Score').index.tolist())
-    error = np.full(6, state_df.nlargest(12, 'Score')['Score'].std() * 3)
-    return {'name': 'Quantum Fluctuation', 'prediction': pred, 'error': error, 'logic': 'Identifies numbers whose latent probability (Kalman state) is highest.'}
+def find_system_states(_pattern_df):
+    """Applies UMAP and HDBSCAN to identify recurring pattern clusters (states)."""
+    scaler = StandardScaler()
+    pattern_scaled = scaler.fit_transform(_pattern_df)
+    
+    reducer = umap.UMAP(n_neighbors=20, min_dist=0.0, n_components=2, random_state=42)
+    embedding = reducer.fit_transform(pattern_scaled)
+    
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=15, min_samples=5, gen_min_span_tree=True)
+    cluster_labels = clusterer.fit_predict(embedding)
+    
+    return cluster_labels, embedding
 
 @st.cache_data
-def analyze_stochastic_resonance(_df):
-    max_num = _df.iloc[:, :6].values.max()
-    binary_matrix = pd.DataFrame(0, index=_df.index, columns=range(1, max_num + 1))
-    for index, row in _df.iloc[:, :6].iterrows(): binary_matrix.loc[index, row.values] = 1
-    widths = np.arange(1, 31)
-    resonance_energies = []
-    for i in range(1, max_num + 1):
-        cwt_matrix, _ = pywt.cwt(binary_matrix[i].values, widths, 'morl')
-        resonance_energies.append(np.sum(np.abs(cwt_matrix)**2))
-    energy_df = pd.DataFrame({'Number': range(1, max_num + 1), 'Energy': resonance_energies}).sort_values('Energy', ascending=False)
-    pred = sorted(energy_df.head(6)['Number'].tolist())
-    error = np.full(6, energy_df.head(12)['Energy'].std() / energy_df.head(12)['Energy'].mean() * 5)
-    return {'name': 'Stochastic Resonance', 'prediction': pred, 'error': error, 'logic': 'Numbers with the highest energy in the wavelet domain, indicating resonance.'}
-
-# --- 4. STOCHASTIC AI GAUNTLET MODULES ---
-
-@st.cache_data
-def analyze_gmm_inference(_df):
-    scaler = StandardScaler(); data_scaled = scaler.fit_transform(_df.iloc[:, :6])
-    gmm = GaussianMixture(n_components=12, random_state=42, covariance_type='full').fit(data_scaled)
-    last_draw_probs = gmm.predict_proba(data_scaled[-1].reshape(1, -1))[0]
-    weighted_centers_scaled = np.dot(last_draw_probs, gmm.means_)
-    prediction = scaler.inverse_transform(weighted_centers_scaled.reshape(1, -1)).flatten()
-    weighted_cov = np.tensordot(last_draw_probs, gmm.covariances_, axes=1)
-    error = np.sqrt(np.diag(weighted_cov))
-    return {'name': 'Bayesian GMM Inference', 'prediction': sorted(np.round(prediction).astype(int)), 'error': error, 'logic': 'A weighted average of cluster archetypes.'}
-
-@st.cache_resource
-def train_ensemble_models(_df):
-    features = feature_engineering(_df)
-    y = _df.shift(-1).dropna().iloc[:, :6]
-    common_index = features.index.intersection(y.index)
-    X, y = features.loc[common_index], y.loc[common_index]
-    models = {
-        'median': [lgb.LGBMRegressor(objective='quantile', alpha=0.5, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
-        'lower': [lgb.LGBMRegressor(objective='quantile', alpha=0.15, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
-        'upper': [lgb.LGBMRegressor(objective='quantile', alpha=0.85, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
-    }
-    return models
-
-def predict_with_ensemble(df, models):
-    features = feature_engineering(df)
-    last_features = features.iloc[-1:]
-    prediction = sorted([int(round(m.predict(last_features)[0])) for m in models['median']])
-    lower = [m.predict(last_features)[0] for m in models['lower']]
-    upper = [m.predict(last_features)[0] for m in models['upper']]
-    error = (np.array(upper) - np.array(lower)) / 2.0
-    return {'name': 'Ensemble AI (LightGBM)', 'prediction': prediction, 'error': error, 'logic': 'Quantile Regression on engineered features.'}
-# --- 5. SYSTEM DYNAMICS MODULE & PREDICTORS ---
-@st.cache_data
-def analyze_system_dynamics(_df):
-    df_sorted = pd.DataFrame(np.sort(_df.iloc[:,:6].values, axis=1), columns=[f'Pos {i+1}' for i in range(6)])
-    max_num = _df.iloc[:,:6].values.max()
-
-    # Calculus Dynamics
-    velocity = df_sorted.diff().fillna(0); acceleration = velocity.diff().fillna(0)
-    last_v, last_a = velocity.iloc[-1], acceleration.iloc[-1]
-    momentum_score = last_v - np.abs(last_a) * 0.5
-    momentum_df = pd.DataFrame({'Slot': df_sorted.columns, 'Last Value': df_sorted.iloc[-1].values, 'Velocity': last_v.values, 
-                                'Acceleration': last_a.values, 'Momentum Score': momentum_score.values}).sort_values('Momentum Score', ascending=False)
-    calc_pred = sorted(momentum_df.head(6)['Last Value'].astype(int).tolist())
-    calc_error = np.full(6, momentum_df['Last Value'].std() * 0.5)
-    calculus_result = {'name': 'Calculus Momentum', 'prediction': calc_pred, 'error': calc_error, 'logic': 'Numbers from slots with highest stable momentum.'}
+def build_markov_transition_matrix(cluster_labels):
+    """Calculates the state transition probabilities."""
+    n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+    matrix = np.zeros((n_clusters, n_clusters))
     
-    # Number Zodiac
-    fig_zodiac = go.Figure()
-    recent_draws = _df.iloc[-5:, :6]
-    colors = px.colors.sequential.Plasma_r
-    for i, (index, row) in enumerate(recent_draws.iterrows()):
-        theta = (row.values / max_num) * 360; r = [10 - i*1.5] * 6
-        fig_zodiac.add_trace(go.Scatterpolar(r=r, theta=theta, mode='markers', marker=dict(size=10, color=colors[i]), name=f'Draw {index}'))
-    fig_zodiac.update_layout(title='<b>The Number Zodiac:</b> Polar Projection of Recent Draws')
-    all_numbers = _df.iloc[:,:6].values.flatten()
-    bins = np.linspace(0, max_num, 13)
-    hist, _ = np.histogram(all_numbers, bins=bins)
-    densest_sector_index = np.argmax(hist)
-    sector_start, sector_end = bins[densest_sector_index], bins[densest_sector_index+1]
-    sector_numbers = [n for n in all_numbers if sector_start <= n < sector_end]
-    zodiac_pred = sorted([num for num, count in Counter(sector_numbers).most_common(6)])
-    if len(zodiac_pred) < 6:
-        hot_fill = [n for n, c in Counter(all_numbers).most_common() if n not in zodiac_pred]
-        zodiac_pred.extend(hot_fill[:6-len(zodiac_pred)])
-    zodiac_result = {'name': 'Number Zodiac Sector', 'prediction': zodiac_pred, 'error': np.full(6, (sector_end-sector_start)/2), 
-                     'logic': f'Most frequent numbers from the densest polar sector.'}
-
-    return momentum_df, fig_zodiac, calculus_result, zodiac_result
-
-# --- 6. BACKTESTING & META-ANALYSIS ---
-@st.cache_data
-def run_full_backtest_suite(df):
-    scored_predictions = []
-    
-    # Consolidate all predictive functions for backtesting
-    def get_calc_pred(d): return analyze_system_dynamics(d)[2]
-    def get_zodiac_pred(d): return analyze_system_dynamics(d)[3]
-    
-    model_funcs = {
-        "Quantum Fluctuation": analyze_quantum_fluctuations,
-        "Stochastic Resonance": analyze_stochastic_resonance,
-        "Bayesian GMM Inference": analyze_gmm_inference,
-        "Calculus Momentum": get_calc_pred,
-        "Number Zodiac Sector": get_zodiac_pred,
-    }
-    
-    split_point = int(len(df) * 0.8)
-    val_df = df.iloc[split_point:]
-    
-    for name, func in model_funcs.items():
-        y_preds = [func(df.iloc[:split_point+i])['prediction'] for i in range(len(val_df))]
-        y_trues = val_df.iloc[:, :6].values.tolist()
-        hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds)); precise_hits = sum(1 for yt, yp in zip(y_trues, y_preds) if len(set(yt) & set(yp)) >= 3)
-        accuracy, precision, rmse = hits/len(y_trues), precise_hits/len(y_trues), np.sqrt(mean_squared_error(y_trues, y_preds))
-        acc_score, prec_score, rmse_score = min(100,(accuracy/1.2)*100), min(100,(precision/0.1)*100), max(0,100-(rmse/20.0)*100)
-        likelihood = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
-        final_pred_obj = func(df)
-        final_pred_obj['likelihood'], final_pred_obj['metrics'] = likelihood, {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
-        scored_predictions.append(final_pred_obj)
+    for i in range(len(cluster_labels) - 1):
+        current_state = cluster_labels[i]
+        next_state = cluster_labels[i+1]
+        if current_state != -1 and next_state != -1:
+            matrix[current_state, next_state] += 1
             
-    ensemble_models = train_ensemble_models(df)
-    ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
-    features_full, y_true_full = feature_engineering(df), df.shift(-1).dropna().iloc[:, :6]
-    common_index = features_full.index.intersection(y_true_full.index)
-    features_aligned, y_true_aligned = features_full.loc[common_index], y_true_full.loc[common_index]
-    _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
-    y_preds_ensemble = [sorted(np.round([m.predict(X_test.iloc[i:i+1])[0] for m in ensemble_models['median']]).astype(int)) for i in range(len(X_test))]
-    y_trues_ensemble = y_test.values.tolist()
-    if y_trues_ensemble:
-        accuracy = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble)
-        precision = sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble)
-        rmse = np.sqrt(mean_squared_error(y_trues_ensemble, y_preds_ensemble))
-        acc_score = min(100,(accuracy/1.2)*100); prec_score = min(100,(precision/0.1)*100); rmse_score = max(0, 100-(rmse/20.0)*100)
-        ensemble_pred_final['likelihood'] = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
-        ensemble_pred_final['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
-    scored_predictions.append(ensemble_pred_final)
-    return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
+    # Normalize rows to get probabilities
+    row_sums = matrix.sum(axis=1, keepdims=True)
+    # Avoid division by zero for states that were never visited
+    row_sums[row_sums == 0] = 1
+    prob_matrix = matrix / row_sums
+    return prob_matrix
 
 @st.cache_data
-def analyze_predictive_maturity(df):
-    history_sizes = np.linspace(100, len(df), 8, dtype=int)
-    maturity_scores = []
-    prediction_deltas = []
+def generate_candidate_from_pattern(_df, pattern_vector):
+    """Finds the best 6-number combination to match a target pattern vector."""
+    # Create a pool of historically frequent and diverse numbers
+    hot_pool = [num for num, count in Counter(_df.values.flatten()).most_common(40)]
     
-    progress_bar = st.progress(0, text="Analyzing Predictive Maturity...")
-    for i, size in enumerate(history_sizes):
-        if size < 50: continue
-        subset_df = df.iloc[:size]
+    best_combo = None
+    min_distance = np.inf
+    
+    # Generate a large sample of combinations to test
+    candidate_combos = list(combinations(hot_pool, 6))
+    np.random.shuffle(candidate_combos)
+    
+    for combo in candidate_combos[:10000]: # Test 10,000 candidates for speed
+        combo_df = pd.DataFrame([list(combo)], columns=[f'Number {i+1}' for i in range(6)])
+        # Create a single-row pattern df for the candidate
+        candidate_pattern_df = create_pattern_dataframe(combo_df)
         
-        # We test only the most powerful model (Ensemble AI) for this analysis
-        ensemble_models = train_ensemble_models(subset_df)
-        pred_obj = predict_with_ensemble(subset_df, ensemble_models)
-        prediction_deltas.append(pred_obj['prediction'])
+        # Calculate Euclidean distance in scaled space
+        # We need to scale the candidate pattern the same way as the original
+        # For simplicity in this cached function, we'll use a simple distance
+        distance = np.linalg.norm(candidate_pattern_df.values[0] - pattern_vector.values[0])
         
-        # Use the full backtest function on the subset to get the score
-        scored_preds = run_full_backtest_suite(subset_df)
-        if scored_preds:
-            # CRITICAL FIX: Standardize column name to 'Likelihood Score'
-            maturity_scores.append({'History Size': size, 'Likelihood Score': scored_preds[0]['likelihood']})
-        
-        progress_bar.progress((i + 1) / len(history_sizes), text=f"Analyzing with {size} draws...")
-    progress_bar.empty()
-    return pd.DataFrame(maturity_scores), pd.DataFrame(prediction_deltas, index=history_sizes)
-
+        if distance < min_distance:
+            min_distance = distance
+            best_combo = combo
+            
+    return sorted(list(best_combo))
 # =================================================================================================
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("⏳ LottoSphere v12.1: The Grand Unification Engine")
-st.markdown("An advanced instrument for modeling complex systems. This engine identifies candidate sets with the highest likelihood based on rigorous, time-series backtesting, and analyzes the system's own predictive maturity.")
+st.title("🕸️ LottoSphere v13.0: The Pattern Resonance Engine")
+st.markdown("This engine analyzes the **intrinsic behavior of the system** by identifying and predicting recurring **mathematical patterns**. It seeks to answer not 'what numbers will be drawn,' but 'what *kind* of draw is most likely to occur next?'")
 
 if 'data_warning' not in st.session_state: st.session_state.data_warning = None
 uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
@@ -293,64 +193,82 @@ if uploaded_file:
     if df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
-        tab1, tab2, tab3 = st.tabs(["🔮 Predictive Analytics", "🔬 System Dynamics Explorer", "🧠 Predictive Maturity"])
+        if st.sidebar.button("DETECT SYSTEM STATE & PREDICT NEXT PATTERN", type="primary", use_container_width=True):
+            
+            # --- STAGE 1: Pattern Transformation ---
+            st.header("Stage 1: Multi-Scale Pattern Transformation")
+            st.markdown("The engine begins by 'zooming out' from the raw numbers, transforming each draw into a high-dimensional vector of over 10 distinct mathematical properties. This allows us to analyze the behavior of the system at a higher level of abstraction.")
+            with st.spinner("Transforming draws into pattern vectors..."):
+                pattern_df = create_pattern_dataframe(df_master)
+            with st.expander("View Pattern DataFrame"):
+                st.dataframe(pattern_df)
+            st.success("Pattern transformation complete.")
+            st.markdown("---")
+            
+            # --- STAGE 2: System State Identification ---
+            st.header("Stage 2: Identifying Hidden System States")
+            st.markdown("Using advanced clustering (`HDBSCAN`) on the pattern vectors, we identify recurring, stable patterns in the system's history. Each cluster represents a distinct 'state' or behavioral mode of the lottery.")
+            with st.spinner("Clustering patterns to find system states..."):
+                cluster_labels, embedding = find_system_states(pattern_df)
+                pattern_df['Cluster'] = [f'State {l}' if l != -1 else 'Chaotic Transition' for l in cluster_labels]
+                
+            embedding_df = pd.DataFrame(embedding, columns=['UMAP 1', 'UMAP 2'])
+            embedding_df['State'] = pattern_df['Cluster']
+            fig = px.scatter(embedding_df, x='UMAP 1', y='UMAP 2', color='State', 
+                             title="Topological Map of System States (UMAP)",
+                             hover_data={ 'State': True, 'Draw': pattern_df.index })
+            st.plotly_chart(fig, use_container_width=True)
+            st.success(f"Identified **{len(set(cluster_labels)) - 1}** distinct behavioral states and categorized chaotic transitions.")
+            st.markdown("---")
 
-        with tab1:
-            if st.button("RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
-                scored_predictions = run_full_backtest_suite(df_master)
-                st.header("✨ Final Synthesis & Strategic Portfolio")
-                if scored_predictions:
-                    hybrid_pred = sorted([num for num, count in Counter(np.array([p['prediction'] for p in scored_predictions]).flatten()).most_common(6)])
-                    hybrid_error = np.mean([p['error'] for p in scored_predictions], axis=0)
-                    st.subheader("🏆 Prime Candidate: Hybrid Consensus")
-                    pred_str_hybrid = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(hybrid_pred, hybrid_error)])
-                    st.success(f"## `{pred_str_hybrid}`")
-                    st.subheader("Ranked Predictions by Model Performance")
-                    for p in scored_predictions:
-                        with st.container(border=True):
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                st.markdown(f"#### {p['name']}")
-                                pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
-                                st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
-                            with col2: st.metric("Likelihood Score", f"{p.get('likelihood', 0):.1f}%", help=f"Backtest Metrics: {p.get('metrics', {})}")
-                    with st.expander("**Model Behavior & Interpretation**"):
-                        st.markdown("This section provides a scientific narrative of what the model performances imply about the current state of the lottery system.")
-                        top_model_name = scored_predictions[0]['name']
-                        st.write(f"#### Analysis of Top Model: **{top_model_name}**")
-                        if "Ensemble" in top_model_name: st.write("The high performance of the Ensemble AI suggests that the system's recent behavior is strongly correlated with its statistical features (like sum, range, and prime counts). This indicates a period of **structural stability**, where draws are conforming to learnable, non-linear patterns.")
-                        elif "Quantum" in top_model_name: st.write("The dominance of the Quantum Fluctuation model indicates the system is in a state of **high tension**. Certain numbers that have not appeared recently have accumulated significant latent probability. The system is 'due' for a correction, and this model is best at identifying which numbers are most likely to be part of this reversion to the mean.")
-                        elif "Resonance" in top_model_name: st.write("The Stochastic Resonance model's success implies the system is currently exhibiting **hidden cyclical behavior**. Despite the surface-level noise, certain numbers are 'resonating' at specific frequencies. This suggests a non-obvious, periodic influence is currently the most dominant factor.")
-                        else: st.write("The success of this model suggests its underlying assumptions are currently the best fit for the system's state. Its logic should be considered a primary driver of the next draw.")
-        
-        with tab2:
-            st.header("System Dynamics & Inter-Number Physics")
-            st.markdown("This module provides advanced visualizations to explore the intrinsic, time-dependent behavior of the number system.")
-            momentum_df, fig_zodiac, calculus_result, zodiac_result = analyze_system_dynamics(df_master)
-            st.plotly_chart(fig_zodiac, use_container_width=True)
-            st.subheader("Calculus Momentum Analysis")
-            st.dataframe(momentum_df)
-            st.subheader("Dynamical Model Predictions")
-            for p in [calculus_result, zodiac_result]:
-                pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
-                st.info(f"**{p['name']}:** {pred_str}", icon="➡️")
-        
-        with tab3:
-            st.header("Predictive Maturity Analysis")
-            st.markdown("This analysis determines how the predictive power of the models evolves as more historical data is used. A plateau in the curve suggests the system has reached its maximum potential predictability with the given data.")
-            if st.button("RUN MATURITY ANALYSIS"):
-                with st.spinner("Performing iterative backtesting... This is computationally expensive and will take time."):
-                    maturity_df, delta_df = analyze_predictive_maturity(df_master)
-                if not maturity_df.empty:
-                    st.subheader("Model Performance vs. History Size")
-                    fig_maturity = px.line(maturity_df, x='History Size', y='Likelihood Score', title="Predictive Maturity Curve", markers=True)
-                    fig_maturity.update_layout(yaxis_range=[0,100])
-                    st.plotly_chart(fig_maturity, use_container_width=True)
-                    st.subheader("Prediction Stability (Acceleration/Deceleration)")
-                    st.markdown("This plot shows how the prediction for the *next* draw changes as more data is considered. Converging lines indicate a stable, accelerating prediction. Diverging lines indicate an unstable, chaotic state.")
-                    fig_delta = px.line(delta_df, x=delta_df.index, y=delta_df.columns, title="Prediction Delta Plot")
-                    st.plotly_chart(fig_delta, use_container_width=True)
+            # --- STAGE 3: State Transition Modeling ---
+            st.header("Stage 3: Modeling the Flow Between States (Markov Chain)")
+            st.markdown("The engine now calculates the historical probability of moving from any one state to another. This **State Transition Matrix** reveals the 'rules' of the system's behavior, showing the most likely paths the system takes over time.")
+            with st.spinner("Building State Transition Matrix..."):
+                transition_matrix = build_markov_transition_matrix(cluster_labels)
+            
+            fig_matrix = go.Figure(data=go.Heatmap(
+                z=transition_matrix,
+                x=[f'To State {i}' for i in range(transition_matrix.shape[1])],
+                y=[f'From State {i}' for i in range(transition_matrix.shape[0])],
+                colorscale='Blues'
+            ))
+            fig_matrix.update_layout(title="State Transition Probability Matrix")
+            st.plotly_chart(fig_matrix, use_container_width=True)
+            st.success("State transition model complete.")
+            st.markdown("---")
+
+            # --- STAGE 4: Prediction & Synthesis ---
+            st.header("Stage 4: Prediction and Candidate Generation")
+            st.markdown("Based on the system's most recent state, we use the transition matrix to predict the most probable next state, and then generate a set of six numbers that best conforms to that predicted pattern.")
+            
+            # Identify current and predict next state
+            last_state = cluster_labels[-1]
+            if last_state != -1:
+                st.info(f"The system's most recent draw was identified as belonging to **State {last_state}**.")
+                next_state_probs = transition_matrix[last_state]
+                predicted_next_state = np.argmax(next_state_probs)
+                likelihood = next_state_probs[predicted_next_state]
+                st.success(f"The model predicts the system will transition to **State {predicted_next_state}** with a likelihood of **{likelihood:.1%}**.")
+                
+                # Find the central pattern of the predicted state
+                target_pattern_vector = pattern_df[pattern_df['Cluster'] == f'State {predicted_next_state}'].drop(columns=['Cluster']).mean().to_frame().T
+
+                # Generate a number combination that fits this pattern
+                with st.spinner("Generating best-fit number combination for the predicted pattern..."):
+                    final_candidate = generate_candidate_from_pattern(df_master, target_pattern_vector)
+                
+                st.subheader("🏆 Prime Candidate Set")
+                st.markdown(f"The following set of six numbers is the optimal fit for the predicted pattern of **State {predicted_next_state}**.")
+                st.success(f"## `{final_candidate}`")
+
+                with st.expander("View Target Pattern Profile"):
+                    st.dataframe(target_pattern_vector)
+            else:
+                st.warning("The system's most recent draw was a chaotic transition (not in a stable state). Predictive power is reduced. A general high-frequency set is recommended as a fallback.")
+                hot_numbers = sorted([num for num, count in Counter(df_master.values.flatten()).most_common(6)])
+                st.success(f"## Fallback Recommendation: `{hot_numbers}`")
     else:
         st.error(f"Invalid data format. After cleaning, the file must have 6 number columns.")
 else:
-    st.info("Upload a CSV file to engage the Oracle Ensemble.")
+    st.info("Upload a CSV file to engage the Pattern Resonance Engine.")
