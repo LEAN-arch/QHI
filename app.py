@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems & Theoretical Physics)
 # DATE: 2024-07-25
-# VERSION: 9.1.0 (Dependency Fix & Finalization)
+# VERSION: 9.2.0 (Data Robustness Fix)
 #
 # DESCRIPTION:
 # This engine abandons conventional prediction. It operates as an instrument of discovery,
@@ -11,12 +11,11 @@
 # independence. It models the lottery as a complex dynamical system and uses techniques from
 # theoretical physics and advanced mathematics to identify moments of anomalous emerging order.
 #
-# VERSION 9.1.0 ENHANCEMENTS:
-# - CRITICAL FIX (ImportError): Resolved the fatal `ImportError` for `cwt` from `scipy.signal`.
-#   The deprecated function has been replaced with the modern, industry-standard `pywavelets`
-#   library, making the Stochastic Resonance module more robust and powerful.
-# - DEPENDENCY MANAGEMENT: Added `pywavelets` to the `requirements.txt` file.
-# - The application is now fully stable and uses current best practices for all libraries.
+# VERSION 9.2.0 ENHANCEMENTS:
+# - CRITICAL FIX (ValueError): Resolved a fatal `ValueError` in the Quantum Fluctuation module.
+#   The error was caused by assuming input draws would always contain unique numbers. The code
+#   has been made robust by converting each draw to a `set` to ensure uniqueness before using
+#   it for indexing, preventing crashes from duplicate labels in the data.
 # =================================================================================================
 
 import streamlit as st
@@ -33,11 +32,11 @@ import matplotlib.pyplot as plt
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 from sklearn.neighbors import KernelDensity
-import pywt # NEW: Replaces scipy.signal.cwt for modern wavelet analysis
+import pywt
 
 # --- 1. APPLICATION CONFIGURATION ---
 st.set_page_config(
-    page_title="LottoSphere v9.1: Acausal Engine",
+    page_title="LottoSphere v9.2: Acausal Engine",
     page_icon="✨",
     layout="wide",
 )
@@ -59,23 +58,30 @@ def load_data(uploaded_file):
 def analyze_quantum_fluctuations(_df):
     """Models the latent probability of each number as a quantum state using a Kalman Filter."""
     max_num = _df.values.max()
+    # Create a binary matrix: 1 if number is present, 0 otherwise
     binary_matrix = pd.DataFrame(0, index=_df.index, columns=range(1, max_num + 1))
     for index, row in _df.iterrows():
-        binary_matrix.loc[index, row.values] = 1
+        # CRITICAL FIX: Convert row values to a set to handle potential duplicate numbers in a draw,
+        # then back to a list for pandas indexing. This prevents the `ValueError`.
+        unique_numbers = list(set(row.values))
+        binary_matrix.loc[index, unique_numbers] = 1
 
+    # Kalman Filter setup for each number's time series
     kf_states = []
     for i in range(1, max_num + 1):
         kf = KalmanFilter(dim_x=2, dim_z=1)
-        kf.x = np.array([0., 0.])
-        kf.F = np.array([[1., 1.], [0., 1.]])
-        kf.H = np.array([[1., 0.]])
-        kf.R = 5
-        kf.Q = Q_discrete_white_noise(dim=2, dt=0.1, var=0.13)
+        kf.x = np.array([0., 0.]) # Initial state [probability, trend]
+        kf.F = np.array([[1., 1.], [0., 1.]]) # State transition matrix
+        kf.H = np.array([[1., 0.]]) # Measurement function
+        kf.R = 5 # Measurement uncertainty
+        kf.Q = Q_discrete_white_noise(dim=2, dt=0.1, var=0.13) # Process uncertainty
+        
+        # Run the filter over the historical data
         mu, _, _, _ = kf.batch_filter(binary_matrix[i].values)
-        kf_states.append(mu[-1])
+        kf_states.append(mu[-1]) # Store the final state [prob, trend]
 
     state_df = pd.DataFrame(kf_states, columns=['Latent_Probability', 'Trend'], index=range(1, max_num + 1))
-    state_df['Is_Due_Score'] = state_df['Latent_Probability'] + state_df['Trend'] * 2
+    state_df['Is_Due_Score'] = state_df['Latent_Probability'] + state_df['Trend'] * 2 # Weight trend heavily
     
     pred = sorted(state_df.nlargest(6, 'Is_Due_Score').index.tolist())
     coherence = (state_df['Is_Due_Score'].nlargest(6).mean() / state_df['Is_Due_Score'].std()) * 20
@@ -93,12 +99,16 @@ def analyze_symmetries(_df):
 
     transformed_draws = {}
     for i, draw in enumerate(draws):
+        # Ensure draw has unique numbers for transformation
+        unique_draw = tuple(set(draw))
+        if len(unique_draw) != 6: continue # Skip malformed draws
+
         for v in [3, 5, 7]:
-            t_draw = transform_mod_add(draw, v)
+            t_draw = transform_mod_add(unique_draw, v)
             if t_draw not in transformed_draws: transformed_draws[t_draw] = []
             transformed_draws[t_draw].append(i)
         for v in [25, 30]:
-            t_draw = transform_reflection(draw, v)
+            t_draw = transform_reflection(unique_draw, v)
             if len(t_draw) == 6:
                 if t_draw not in transformed_draws: transformed_draws[t_draw] = []
                 transformed_draws[t_draw].append(i)
@@ -127,9 +137,9 @@ def analyze_barycentric_attractors(_df):
     low_boundary, high_boundary = max_num / 3, 2 * max_num / 3
     
     weights = _df.apply(lambda r: [
-        sum(1 for n in r if n <= low_boundary),
-        sum(1 for n in r if low_boundary < n <= high_boundary),
-        sum(1 for n in r if n > high_boundary)
+        sum(1 for n in set(r) if n <= low_boundary),
+        sum(1 for n in set(r) if low_boundary < n <= high_boundary),
+        sum(1 for n in set(r) if n > high_boundary)
     ], axis=1)
     weights = np.array(weights.tolist()) / 6.0
     
@@ -156,8 +166,8 @@ def analyze_barycentric_attractors(_df):
     n_low = int(round(attractor_weights[0] * 6))
     n_mid = int(round(attractor_weights[1] * 6))
     n_high = 6 - n_low - n_mid
-    if n_high < 0: n_high = 0 # Ensure non-negative
-    if (n_low + n_mid + n_high) != 6: # Adjust if rounding caused issues
+    if n_high < 0: n_high = 0
+    if (n_low + n_mid + n_high) != 6:
         n_low = 6 - n_mid - n_high
 
     pred = (sorted(all_numbers[all_numbers['is_low']==1].sample(n_low, random_state=42)['num'].tolist()) +
@@ -175,15 +185,15 @@ def analyze_stochastic_resonance(_df):
     max_num = _df.values.max()
     binary_matrix = pd.DataFrame(0, index=_df.index, columns=range(1, max_num + 1))
     for index, row in _df.iterrows():
-        binary_matrix.loc[index, row.values] = 1
+        unique_numbers = list(set(row.values))
+        binary_matrix.loc[index, unique_numbers] = 1
 
     widths = np.arange(1, 31)
     resonance_energies = []
     
     for i in range(1, max_num + 1):
         signal = binary_matrix[i].values
-        # Using pywt.cwt which is the modern, correct library
-        cwt_matrix, _ = pywt.cwt(signal, widths, 'morl') # Using Morlet wavelet, good for oscillating signals
+        cwt_matrix, _ = pywt.cwt(signal, widths, 'morl')
         energy = np.sum(np.abs(cwt_matrix)**2)
         resonance_energies.append(energy)
         
@@ -197,7 +207,7 @@ def analyze_stochastic_resonance(_df):
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("✨ LottoSphere v9.1: The Acausal Engine")
+st.title("✨ LottoSphere v9.2: The Acausal Engine")
 st.markdown("An instrument of discovery designed to detect **acausal, non-local, and synchronous patterns** that lie beneath the veil of apparent randomness. It does not predict the future; it reveals moments of anomalous order in the present.")
 st.warning("This tool is a theoretical exploration into complex systems and does not guarantee winning. It is for research and entertainment purposes.", icon="⚠️")
 
