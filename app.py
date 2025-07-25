@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 10.7.0 (UI/Compute Separation & Finalization)
+# VERSION: 10.8.0 (Definitive Time-Series Alignment Fix)
 #
 # DESCRIPTION:
 # This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
@@ -14,12 +14,11 @@
 # All models are now evaluated using a rigorous, chronologically-ordered "walk-forward"
 # backtesting methodology to accurately score their historical forecasting performance.
 #
-# VERSION 10.7.0 ENHANCEMENTS:
-# - CRITICAL FIX (NameError): Resolved the fatal `NameError` by separating computation from
-#   presentation. All Streamlit UI calls (`st.*`) have been removed from cached functions,
-#   which is a core requirement for using Streamlit's caching mechanism correctly.
-# - ARCHITECTURAL IMPROVEMENT: The main app logic now calls the cached computation functions
-#   first and then handles the UI presentation, leading to a more robust and efficient app.
+# VERSION 10.8.0 ENHANCEMENTS:
+# - CRITICAL FIX (KeyError): Resolved the fatal `KeyError` by re-architecting the time-series
+#   data preparation pipeline for the AI models. The code now uses a robust index intersection
+#   method to perfectly align the feature (X) and label (y) DataFrames, making the system
+#   structurally immune to this class of error.
 # =================================================================================================
 
 import streamlit as st
@@ -67,7 +66,6 @@ def load_data(uploaded_file):
     valid_rows_mask = (unique_counts == num_cols)
     
     if not valid_rows_mask.all():
-        # Using a session state to show the warning only once in the main app body
         st.session_state.data_warning = f"Data integrity issue found. Discarded {len(df) - valid_rows_mask.sum()} rows with duplicate or missing numbers."
         df = df[valid_rows_mask].reset_index(drop=True)
 
@@ -170,7 +168,12 @@ def analyze_topological_ai(_df):
 def train_ensemble_models(_df):
     features = feature_engineering(_df)
     y = _df.shift(-1).dropna().iloc[:, :6]
-    X = features.loc[y.index]
+    
+    # --- CRITICAL FIX: Robust Index Alignment ---
+    common_index = features.index.intersection(y.index)
+    X = features.loc[common_index]
+    y = y.loc[common_index]
+    
     models = {
         'median': [lgb.LGBMRegressor(objective='quantile', alpha=0.5, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
         'lower': [lgb.LGBMRegressor(objective='quantile', alpha=0.15, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
@@ -201,17 +204,12 @@ def backtest_and_score(df):
     
     scored_predictions = []
     
-    # Progress tracking setup in session state to be updated by the main app
-    st.session_state.backtest_progress = 0
-    total_steps = (len(val_df) - 1) * len(model_funcs)
-    
     for name, func in model_funcs.items():
         y_preds, y_trues = [], []
         for i in range(len(val_df) - 1):
             historical_df = df.iloc[:split_point+i]
             y_preds.append(func(historical_df)['prediction'])
             y_trues.append(val_df.iloc[i+1, :6].tolist())
-            st.session_state.backtest_progress += 1
 
         if not y_preds: continue
 
@@ -231,14 +229,17 @@ def backtest_and_score(df):
         final_pred_obj['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
         scored_predictions.append(final_pred_obj)
             
-    # --- Ensemble model backtesting ---
+    # --- Ensemble model backtesting with DEFINITIVE FIX ---
     ensemble_models = train_ensemble_models(df)
     ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
     
     features_full = feature_engineering(df)
     y_true_full = df.shift(-1).dropna().iloc[:, :6]
+    
     common_index = features_full.index.intersection(y_true_full.index)
-    features_aligned, y_true_aligned = features_full.loc[common_index], y_true_full.loc[common_index]
+    features_aligned = features_full.loc[common_index]
+    y_true_aligned = y_true_full.loc[common_index]
+
     _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
     
     y_preds_ensemble = [sorted(np.round([m.predict(X_test.iloc[i:i+1])[0] for m in ensemble_models['median']]).astype(int)) for i in range(len(X_test))]
@@ -266,31 +267,26 @@ def backtest_and_score(df):
 st.title("💠 LottoSphere X: The Oracle Ensemble")
 st.markdown("An advanced instrument for modeling complex systems. This engine runs two parallel suites of analyses—**Acausal Physics** and **Stochastic AI**—to identify candidate sets with the highest likelihood based on rigorous historical backtesting.")
 
-uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
-
 if 'data_warning' not in st.session_state:
     st.session_state.data_warning = None
+
+uploaded_file = st.sidebar.file_uploader("Upload Number.csv", type=["csv"])
 
 if uploaded_file:
     df_master = load_data(uploaded_file)
     if st.session_state.data_warning:
         st.warning(st.session_state.data_warning)
-        st.session_state.data_warning = None # Clear warning after showing
-        
+        st.session_state.data_warning = None
+
     if df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
         if st.sidebar.button("💠 ENGAGE ORACLE ENSEMBLE", type="primary", use_container_width=True):
             
-            # UI element for progress is here, in the main app logic
-            st.header("Stage 1: Backtesting & Likelihood Scoring")
-            st.markdown("Each model is rigorously evaluated against the last 20% of the historical data to calculate a **Likelihood Score**.")
-            
-            with st.spinner("Backtesting all models... This may take a few minutes."):
+            with st.spinner("Backtesting all models and calculating Likelihood Scores... This may take a few minutes."):
                 scored_predictions = backtest_and_score(df_master)
-            st.success("Backtesting complete.")
             
-            st.header("✨ Stage 2: Final Synthesis & Strategic Portfolio")
+            st.header("✨ Final Synthesis & Strategic Portfolio")
             st.markdown("The Oracle has completed all analyses. Below is the final consensus and the ranked predictions from each model, complete with quantified uncertainty and a **Likelihood Score** based on historical performance.")
             
             if scored_predictions:
