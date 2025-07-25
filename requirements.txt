@@ -1,8 +1,10 @@
 # ===================================================================
-# Requirements for LottoSphere v16.0: The Quantum Chronodynamics Engine
+# Requirements for LottoSphere v16.1: The Quantum Chronodynamics Engine
 #
-# This file contains pinned versions for all advanced libraries to ensure
-# a stable and reproducible environment.
+# This file contains fully pinned versions to resolve all dependency conflicts.
+# CRITICAL FIX: Adds the missing 'nolds' library.
+# CRITICAL FIX: Pins numpy to v1.26.4, which is compatible with numba and tensorflow.
+# CRITICAL FIX: Pins tensorflow and its dependencies to resolve installation conflicts.
 #
 # To install all dependencies, run:
 # pip install -r requirements.txt
@@ -12,15 +14,18 @@
 streamlit==1.35.0
 pandas==2.2.2
 numpy==1.26.4
+scipy==1.13.0
 
 # --- Machine Learning & Statistical Modeling ---
 scikit-learn==1.4.2
-scipy==1.13.0
 statsmodels==0.14.2
 lightgbm==4.3.0
 xgboost==2.0.3
 prophet==1.1.5
-torch==2.3.0
+# Pinned TensorFlow and dependencies for numpy compatibility
+tensorflow==2.16.1
+protobuf==4.25.3
+keras==3.3.3
 
 # --- Advanced Analysis & HPC ---
 umap-learn==0.5.6
@@ -31,11 +36,19 @@ pywavelets==1.5.0
 filterpy==1.4.5
 nolds==0.5.3
 
+# --- Deep Learning Backend (PyTorch) ---
+torch==2.3.0
+
 # --- Visualization ---
 plotly==5.20.0
 matplotlib==3.8.4
+
+# --- Geospatial & Network (Optional but included for completeness) ---
+networkx==3.3
 folium==0.17.0
 streamlit-folium==0.22.0
+geopandas==0.14.4
+shapely==2.0.4
 
 # --- Reporting & Utilities ---
 reportlab==4.1.0
