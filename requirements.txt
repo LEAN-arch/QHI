@@ -1,5 +1,5 @@
 # ===================================================================
-# Requirements for LottoSphere X: The Oracle Ensemble v10.3
+# Requirements for LottoSphere X: The Oracle Ensemble v10.9
 # ===================================================================
 
 # --- Core & Data Handling ---
@@ -12,7 +12,6 @@ scipy
 scikit-learn
 statsmodels
 lightgbm
-xgboost
 prophet
 torch
 filterpy
@@ -22,7 +21,6 @@ pywavelets
 umap-learn
 hdbscan
 shap>=0.41.0
-numba
 
 # --- Visualization & Reporting ---
 plotly
