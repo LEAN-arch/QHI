@@ -3,22 +3,18 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 15.6.0 (Definitive Kalman Filter & Validation Fix)
+# VERSION: 15.7.0 (LightGBM Tuning & Finalization)
 #
 # DESCRIPTION:
 # This definitive version is a masterpiece of hybrid intelligence, unifying the Acausal Physics
 # engine with the Stochastic AI Gauntlet.
 #
-# VERSION 15.6.0 ENHANCEMENTS:
-# - CRITICAL FIX (Kalman Filter): Resolved the issue where the Quantum Fluctuation model would
-#   output all zeros. The filter's initialization has been stabilized, and a post-processing
-#   step now corrects any non-physical outputs.
-# - ROBUSTNESS (Intelligent Failure Handling): The main app logic now checks every prediction
-#   for validity. Failed models (those returning zeros) are flagged and automatically excluded
-#   from the final synthesis and plots, preventing corruption of the results.
-# - ROBUSTNESS (Prediction Constraint): A powerful `constrain_and_validate` function is now
-#   applied to the output of EVERY model as a final safety net, guaranteeing all displayed
-#   predictions are valid, playable numbers.
+# VERSION 15.7.0 ENHANCEMENTS:
+# - WARNING RESOLUTION (LightGBM): Addressed the `No further splits with positive gain`
+#   warnings by tuning the LightGBM hyperparameters (`num_leaves`, `min_child_samples`) to be
+#   more appropriate for a low-signal, high-noise dataset.
+# - CLEAN EXECUTION: Added `verbose=-1` to the LightGBM model to suppress benign warnings,
+#   resulting in a clean, professional execution log.
 # =================================================================================================
 
 import streamlit as st
@@ -107,54 +103,41 @@ def feature_engineering(_df):
     return features
 
 def constrain_and_validate_prediction(raw_prediction, valid_range, hot_pool):
-    """Clips, ensures uniqueness, and intelligently replaces numbers in a prediction."""
     min_val, max_val = valid_range
     clipped = np.clip(np.round(raw_prediction), min_val, max_val).astype(int)
     unique_preds = sorted(list(set(clipped)))
-    
     if len(unique_preds) < 6:
         fillers_needed = 6 - len(unique_preds)
         potential_fillers = [num for num in hot_pool if num not in unique_preds]
         best_fillers = potential_fillers[:fillers_needed]
         unique_preds.extend(best_fillers)
-
     return sorted(unique_preds)[:6]
 
-# --- 3. PREDICTIVE MODULES WITH UNCERTAINTY ---
+# --- 3. PREDICTIVE MODULES ---
 
 @st.cache_data
 def analyze_quantum_fluctuations(_df):
     try:
         if len(_df) < 10: raise ValueError("Insufficient data for Kalman filter.")
         sorted_df = pd.DataFrame(np.sort(_df.iloc[:, :6].values, axis=1))
-        
         kf = KalmanFilter(dim_x=12, dim_z=6)
         dt = 1.0; F_block = np.array([[1, dt], [0, 1]]); kf.F = block_diag(*([F_block] * 6))
         H_block = np.array([[1, 0]]); kf.H = block_diag(*([H_block] * 6))
         kf.R *= 5
         q_block = Q_discrete_white_noise(dim=2, dt=dt, var=0.1); kf.Q = block_diag(*([q_block] * 6))
-        
-        # Stabilized Initial State
         initial_positions = sorted_df.iloc[:5].mean().values
         kf.x = np.array([item for sublist in zip(initial_positions, np.zeros(6)) for item in sublist])
-        
         (mu, cov, _, _) = kf.filter(sorted_df.values)
         kf.predict()
-        
         pred_positions_raw = kf.x[::2]
         pred_uncertainty = np.sqrt(np.diag(kf.P)[::2])
-
-        # Post-process to handle non-physical results
         if np.any(pred_positions_raw <= 0):
             valid_mean = np.mean(pred_positions_raw[pred_positions_raw > 0])
             pred_positions_raw[pred_positions_raw <= 0] = valid_mean
-
         valid_range = (1, _df.iloc[:,:6].values.max())
         hot_pool = [num for num, count in Counter(_df.iloc[:,:6].values.flatten()).most_common(20)]
         final_prediction = constrain_and_validate_prediction(pred_positions_raw, valid_range, hot_pool)
-
-        return {'name': 'Quantum Fluctuation', 'prediction': final_prediction, 'error': pred_uncertainty,
-                'logic': 'A 12D Kalman Filter tracking the position and velocity of each number slot.'}
+        return {'name': 'Quantum Fluctuation', 'prediction': final_prediction, 'error': pred_uncertainty, 'logic': 'A 12D Kalman Filter tracking the position and velocity of each number slot.'}
     except Exception as e:
         return {'name': 'Quantum Fluctuation', 'prediction': [0]*6, 'error': [0]*6, 'logic': f'Failed due to error: {e}'}
 
@@ -164,7 +147,7 @@ def analyze_calculus_momentum(_df):
         sorted_df = pd.DataFrame(np.sort(_df.iloc[:,:6].values, axis=1), columns=[f'Pos {i+1}' for i in range(6)])
         velocity = sorted_df.diff().fillna(0); acceleration = velocity.diff().fillna(0)
         boot_preds = []
-        for _ in range(50): # Reduced for speed
+        for _ in range(50):
             sample_df = sorted_df.sample(frac=0.8, replace=True).sort_index()
             last_v = sample_df.diff().iloc[-1]; last_a = sample_df.diff().diff().iloc[-1]
             score = last_v - np.abs(last_a) * 0.5
@@ -173,11 +156,9 @@ def analyze_calculus_momentum(_df):
         boot_preds = np.array(boot_preds)
         prediction_raw = np.mean(boot_preds, axis=0)
         error = np.std(boot_preds, axis=0)
-
         valid_range = (1, _df.iloc[:,:6].values.max())
         hot_pool = [num for num, count in Counter(_df.iloc[:,:6].values.flatten()).most_common(20)]
         final_prediction = constrain_and_validate_prediction(prediction_raw, valid_range, hot_pool)
-
         return {'name': 'Calculus Momentum', 'prediction': final_prediction, 'error': error, 'logic': 'Numbers from slots with highest stable positive momentum.'}
     except Exception as e:
         return {'name': 'Calculus Momentum', 'prediction': [0]*6, 'error': [0]*6, 'logic': f'Failed due to error: {e}'}
@@ -198,11 +179,9 @@ def analyze_stochastic_resonance(_df):
         boot_preds = np.array(boot_preds)
         prediction_raw = np.mean(boot_preds, axis=0)
         error = np.std(boot_preds, axis=0)
-        
         valid_range = (1, max_num)
         hot_pool = [num for num, count in Counter(_df.iloc[:,:6].values.flatten()).most_common(20)]
         final_prediction = constrain_and_validate_prediction(prediction_raw, valid_range, hot_pool)
-
         return {'name': 'Stochastic Resonance', 'prediction': final_prediction, 'error': error, 'logic': 'Numbers with highest energy in the wavelet domain.'}
     except Exception as e:
         return {'name': 'Stochastic Resonance', 'prediction': [0]*6, 'error': [0]*6, 'logic': f'Failed due to error: {e}'}
@@ -217,11 +196,9 @@ def analyze_gmm_inference(_df):
         prediction_raw = scaler.inverse_transform(weighted_centers_scaled.reshape(1, -1)).flatten()
         weighted_cov = np.tensordot(last_draw_probs, gmm.covariances_, axes=1)
         error = np.sqrt(np.diag(weighted_cov))
-        
         valid_range = (1, _df.iloc[:,:6].values.max())
         hot_pool = [num for num, count in Counter(_df.iloc[:,:6].values.flatten()).most_common(20)]
         final_prediction = constrain_and_validate_prediction(prediction_raw, valid_range, hot_pool)
-
         return {'name': 'Bayesian GMM Inference', 'prediction': final_prediction, 'error': error, 'logic': 'Weighted average of cluster archetypes.'}
     except Exception as e:
         return {'name': 'Bayesian GMM Inference', 'prediction': [0]*6, 'error': [0]*6, 'logic': f'Failed due to error: {e}'}
@@ -253,10 +230,15 @@ def train_ensemble_models(_df):
     y = _df.shift(-1).dropna().iloc[:, :6]
     common_index = features_with_pattern.index.intersection(y.index)
     X, y = features_with_pattern.loc[common_index], y.loc[common_index]
+    
+    # Define model parameters for robustness and speed
+    lgb_params = {'objective': 'quantile', 'metric': 'quantile', 'random_state': 42, 
+                  'n_estimators': 100, 'num_leaves': 10, 'min_child_samples': 5, 'verbose': -1}
+    
     models = {
-        'median': [lgb.LGBMRegressor(objective='quantile', alpha=0.5, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
-        'lower': [lgb.LGBMRegressor(objective='quantile', alpha=0.15, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
-        'upper': [lgb.LGBMRegressor(objective='quantile', alpha=0.85, random_state=42).fit(X, y.iloc[:, i]) for i in range(6)],
+        'median': [lgb.LGBMRegressor(alpha=0.5, **lgb_params).fit(X, y.iloc[:, i]) for i in range(6)],
+        'lower': [lgb.LGBMRegressor(alpha=0.15, **lgb_params).fit(X, y.iloc[:, i]) for i in range(6)],
+        'upper': [lgb.LGBMRegressor(alpha=0.85, **lgb_params).fit(X, y.iloc[:, i]) for i in range(6)],
     }
     return models
 
@@ -271,17 +253,14 @@ def predict_with_ensemble(df, models):
     lower = [m.predict(last_features)[0] for m in models['lower']]
     upper = [m.predict(last_features)[0] for m in models['upper']]
     error = (np.array(upper) - np.array(lower)) / 2.0
-    
     valid_range = (1, df.iloc[:,:6].values.max())
     hot_pool = [num for num, count in Counter(df.iloc[:,:6].values.flatten()).most_common(20)]
     final_prediction = constrain_and_validate_prediction(prediction_raw, valid_range, hot_pool)
-    
     return {'name': 'Ensemble AI (Pattern-Aware)', 'prediction': final_prediction, 'error': error, 'logic': 'Quantile Regression on features including the current system state.'}
 
 @st.cache_data
 def run_full_backtest_suite(df):
     scored_predictions = []
-    
     model_funcs = {
         "Quantum Fluctuation": analyze_quantum_fluctuations,
         "Calculus Momentum": analyze_calculus_momentum,
@@ -292,10 +271,9 @@ def run_full_backtest_suite(df):
     split_point = int(len(df) * 0.8)
     val_df = df.iloc[split_point:]
     
-    progress_bar = st.progress(0, text="Backtesting Acausal & Stochastic Models...")
-    total_steps = (len(val_df) - 1) * len(model_funcs) if len(val_df) > 1 else len(model_funcs)
-    current_step = 0
-
+    # UI elements should be in the main app, not cached functions
+    # progress_bar = st.progress(0, text="Backtesting...")
+    
     for name, func in model_funcs.items():
         y_preds, y_trues = [], []
         if len(val_df) > 1:
@@ -305,9 +283,7 @@ def run_full_backtest_suite(df):
                 if 0 not in pred_obj['prediction']:
                     y_preds.append(pred_obj['prediction'])
                     y_trues.append(val_df.iloc[i + 1, :6].tolist())
-                current_step += 1
-                progress_bar.progress(min(1.0, current_step / total_steps), text=f"Backtested {name} on Draw {i + 1}")
-        
+
         if not y_preds: likelihood, metrics = 0, {}
         else:
             hits = sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues, y_preds))
@@ -321,21 +297,35 @@ def run_full_backtest_suite(df):
         final_pred_obj['likelihood'], final_pred_obj['metrics'] = likelihood, metrics
         scored_predictions.append(final_pred_obj)
             
-    progress_bar.progress(1.0, text="Backtesting Ensemble AI Model...")
+    # Ensemble model backtesting
     ensemble_models = train_ensemble_models(df)
     ensemble_pred_final = predict_with_ensemble(df, ensemble_models)
+    features_full, y_true_full = feature_engineering(df), df.shift(-1).dropna().iloc[:, :6]
+    pattern_df_full = create_pattern_dataframe(df)
+    cluster_labels = find_system_states(pattern_df_full)
+    pattern_df_full['Cluster'] = cluster_labels
+    features_full = features_full.join(pattern_df_full[['Cluster']], how='inner')
+    common_index = features_full.index.intersection(y_true_full.index)
+    features_aligned, y_true_aligned = features_full.loc[common_index], y_true_full.loc[common_index]
+    _, X_test, _, y_test = train_test_split(features_aligned, y_true_aligned, test_size=0.2, shuffle=False)
+    y_preds_ensemble = [sorted(np.round([m.predict(X_test.iloc[i:i+1])[0] for m in ensemble_models['median']]).astype(int)) for i in range(len(X_test))]
+    y_trues_ensemble = y_test.values.tolist()
+    if y_trues_ensemble:
+        accuracy, precision, rmse = (sum(len(set(yt) & set(yp)) for yt, yp in zip(y_trues_ensemble, y_preds_ensemble)) / len(y_trues_ensemble),
+                                   sum(1 for yt, yp in zip(y_trues_ensemble, y_preds_ensemble) if len(set(yt) & set(yp)) >= 3) / len(y_trues_ensemble),
+                                   np.sqrt(mean_squared_error(y_trues_ensemble, y_preds_ensemble)))
+        acc_score = min(100,(accuracy/1.2)*100); prec_score = min(100,(precision/0.1)*100); rmse_score = max(0, 100-(rmse/20.0)*100)
+        ensemble_pred_final['likelihood'] = 0.5 * acc_score + 0.3 * prec_score + 0.2 * rmse_score
+        ensemble_pred_final['metrics'] = {'Avg Hits': f"{accuracy:.2f}", '3+ Hit Rate': f"{precision:.1%}", 'RMSE': f"{rmse:.2f}"}
+    scored_predictions.append(ensemble_pred_final)
     
-    # ... (rest of ensemble backtesting logic is sound)
-    
-    progress_bar.empty()
-    scored_predictions.append(ensemble_pred_final) # Add the ensemble prediction
     return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
 
 # =================================================================================================
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("🌌 LottoSphere v15.6: The Grand Unification Engine")
+st.title("🌌 LottoSphere v15.7: The Grand Unification Engine")
 st.markdown("A hybrid intelligence platform that unifies **Acausal Physics** and **Stochastic AI** models to generate a portfolio of optimal, uncertainty-quantified predictions.")
 
 if 'data_warning' not in st.session_state: st.session_state.data_warning = None
@@ -350,17 +340,16 @@ if uploaded_file:
         
         if st.sidebar.button("💠 ENGAGE UNIFICATION ENGINE", type="primary", use_container_width=True):
             
-            scored_predictions = run_full_backtest_suite(df_master)
+            with st.spinner("Backtesting all models and calculating Likelihood Scores... This may take a few minutes."):
+                scored_predictions = run_full_backtest_suite(df_master)
             
-            # Filter out failed models before displaying
+            st.header("✨ Final Synthesis & The Efficient Frontier")
+            st.markdown("The engine has completed all analyses. The plot below shows the **Efficient Frontier** of predictions, balancing historical performance (Likelihood Score) against current confidence (low error). Models in the top-right quadrant are optimal.")
+
             valid_predictions = [p for p in scored_predictions if p and 0 not in p['prediction']]
-            
             if not valid_predictions:
                 st.error("All predictive models failed to produce a valid output. Please check the data quality or try a larger dataset.")
             else:
-                st.header("✨ Final Synthesis & The Efficient Frontier")
-                st.markdown("The engine has completed all analyses. The plot below shows the **Efficient Frontier** of predictions, balancing historical performance (Likelihood Score) against current confidence (low error). Models in the top-right quadrant are optimal.")
-
                 plot_data = [{'Model': p['name'], 'Likelihood Score': p.get('likelihood', 0),
                               'Confidence (Inverse Avg. Error)': 1 / (np.mean(p['error']) + 0.01) if np.mean(p['error']) > 0 else 100,
                               'Prediction': str(p['prediction'])} for p in valid_predictions]
