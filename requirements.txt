@@ -1,5 +1,5 @@
 # ===================================================================
-# Requirements for LottoSphere X: The Oracle Ensemble v10.2
+# Requirements for LottoSphere X: The Oracle Ensemble v10.3
 # ===================================================================
 
 # --- Core & Data Handling ---
@@ -18,12 +18,16 @@ torch
 filterpy
 pywavelets
 
-# --- Advanced Analysis ---
+# --- Advanced Analysis & HPC ---
 umap-learn
 hdbscan
 shap>=0.41.0
+numba
 
 # --- Visualization & Reporting ---
 plotly
 matplotlib
 reportlab
+
+# --- Utility ---
+requests
