@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 6.0.0 (Celestial Mechanics Engine)
+# VERSION: 6.1.0 (Critical Import Fix)
 #
 # DESCRIPTION:
 # This definitive version integrates principles from classical physics and advanced mathematics,
@@ -12,17 +12,9 @@
 # dynamics (velocity, acceleration, momentum) and fundamental structure (eigenvectors) to
 # generate its predictions.
 #
-# VERSION 6.0 ENHANCEMENTS:
-# - NEW MODULE (Calculus & System Dynamics): Introduces numerical derivatives (velocity,
-#   acceleration, jerk) to analyze the "motion" of each number slot over time, identifying
-#   numbers with stable positive momentum.
-# - NEW MODULE (Linear Algebra & State Space): Performs Eigenvalue Decomposition on the number
-#   covariance matrix to identify the system's principal modes of variation. The prediction
-#   is based on the most dominant eigenvector.
-# - NEW MODULE (Physics-Inspired Momentum): Applies concepts from classical mechanics to
-#   calculate the system's "center of mass" and its momentum, projecting its future state.
-# - SEAMLESS INTEGRATION: The new modules are added to the existing suite of tools without
-#   modifying or removing any of the powerful v5.0 features.
+# VERSION 6.1.0 ENHANCEMENTS:
+# - CRITICAL FIX: Resolved a `NameError` by importing the `Counter` class from the `collections`
+#   module. This was preventing several of the advanced analysis modules from functioning correctly.
 # =================================================================================================
 
 import streamlit as st
@@ -30,6 +22,7 @@ import pandas as pd
 import numpy as np
 import io
 import time
+from collections import Counter # <-- CRITICAL FIX: IMPORT `Counter`
 
 # --- Visualization ---
 import plotly.express as px
@@ -62,7 +55,7 @@ from itertools import combinations
 
 # --- Global Configuration ---
 st.set_page_config(
-    page_title="LottoSphere v6.0: Celestial Mechanics",
+    page_title="LottoSphere v6.1: Celestial Mechanics",
     page_icon="🪐",
     layout="wide",
 )
@@ -111,19 +104,14 @@ def analyze_calculus_dynamics(df):
     st.header("∫ Module 1: Calculus & System Dynamics")
     st.markdown("This module applies numerical calculus to analyze the 'motion' of each number slot over time. We calculate velocity, acceleration, and jerk to identify numbers with stable, positive momentum.")
 
-    # Sort each draw to create semi-stable time series for each slot
     sorted_df = pd.DataFrame(np.sort(df.iloc[:, :6].values, axis=1), columns=[f'Num_{i+1}' for i in range(6)])
     
-    # Calculate numerical derivatives
     velocity = sorted_df.diff()
     acceleration = velocity.diff()
-    jerk = acceleration.diff()
     
-    # Get the most recent dynamic state
     last_v = velocity.iloc[-1]
     last_a = acceleration.iloc[-1]
     
-    # Scoring: Reward positive velocity and low (stable) acceleration
     momentum_score = last_v - np.abs(last_a) * 0.5
     momentum_df = pd.DataFrame({
         'Slot': sorted_df.columns,
@@ -136,7 +124,6 @@ def analyze_calculus_dynamics(df):
     st.write("Recent Dynamic State of Number Slots:")
     st.dataframe(momentum_df)
     
-    # Prediction: the last values from the slots with the highest momentum score
     pred = sorted(momentum_df.head(6)['Last_Value'].astype(int).tolist())
     
     return {'Calculus Momentum': {'prediction': pred, 'logic': 'Numbers from the slots exhibiting the highest stable positive momentum (velocity - |acceleration|).'}}
@@ -147,27 +134,20 @@ def analyze_linear_algebra(df):
     st.markdown("This module treats the entire lottery history as a system governed by linear relationships. By decomposing the number covariance matrix, we find its **eigenvectors**—the fundamental 'modes of vibration' of the system. The prediction is based on the most dominant mode.")
 
     data = df.iloc[:, :6].values
-    # Compute the covariance matrix
     cov_matrix = np.cov(data.T)
-    
-    # Perform eigenvalue decomposition
     eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
-    
-    # Find the dominant eigenvector (corresponding to the largest eigenvalue)
     dominant_eigenvector_index = np.argmax(eigenvalues)
     dominant_eigenvector = eigenvectors[:, dominant_eigenvector_index]
     
-    # The components of the eigenvector represent the 'loadings' or importance of each number slot
     eigen_df = pd.DataFrame({
         'Number_Slot': [f'Num_{i+1}' for i in range(6)],
-        'Eigenvector_Loading': np.abs(dominant_eigenvector) # Use absolute value for importance
+        'Eigenvector_Loading': np.abs(dominant_eigenvector)
     }).sort_values('Eigenvector_Loading', ascending=False)
 
     st.write("Dominant Eigenvector Loadings:")
     fig = px.bar(eigen_df, x='Number_Slot', y='Eigenvector_Loading', title='Importance of Each Number Slot in the Dominant System Mode')
     st.plotly_chart(fig, use_container_width=True)
     
-    # Prediction: Numbers that most frequently appear in the top slots of the dominant eigenvector
     top_slots = eigen_df.head(6)['Number_Slot'].index
     hot_numbers_in_top_slots = Counter(df.iloc[:, top_slots].values.flatten()).most_common(6)
     pred = sorted([num for num, count in hot_numbers_in_top_slots])
@@ -181,18 +161,14 @@ def analyze_physics_momentum(df):
     
     center_of_mass = df.iloc[:, :6].mean(axis=1)
     com_velocity = center_of_mass.diff()
-    
-    # Calculate momentum using EWMA
     com_momentum = com_velocity.ewm(span=10, adjust=False).mean()
     
-    # Project the next state
     last_com = center_of_mass.iloc[-1]
     last_momentum = com_momentum.iloc[-1]
     predicted_next_com = last_com + last_momentum
 
     st.metric("Predicted Next Center of Mass", f"{predicted_next_com:.2f}", f"{last_momentum:.2f} (Current Momentum)")
     
-    # Prediction: Find a combination of the 15 hottest numbers whose mean is closest to the predicted CoM
     hot_numbers = df.iloc[:, :6].stack().value_counts().nlargest(15).index.tolist()
     
     best_combo = []
@@ -212,7 +188,6 @@ def analyze_physics_momentum(df):
 
 def analyze_geo_network(df):
     st.header("🌍 Module 4: Geospatial & Network Analysis")
-    # ... (code from v5.0, unchanged)
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Geographic Hotspot Analysis")
@@ -242,7 +217,6 @@ def analyze_geo_network(df):
 
 def analyze_topological(df):
     st.header("🌀 Module 5: Topological & Non-Linear Analysis (UMAP + HDBSCAN)")
-    # ... (code from v5.0, unchanged)
     with st.spinner("Calculating UMAP embedding and HDBSCAN clusters..."):
         reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42)
         embedding = reducer.fit_transform(df.iloc[:, :6])
@@ -263,7 +237,6 @@ def analyze_topological(df):
 
 def analyze_time_series(df):
     st.header("📈 Module 6: Advanced Time Series Forecasting")
-    # ... (code from v5.0, unchanged)
     col1, col2 = st.columns(2)
     predictions = {}
     with col1:
@@ -293,7 +266,7 @@ def analyze_time_series(df):
             st.success(f"LSTM Prediction: `{pred}`")
     return predictions
 # --- MODULE 7: The Grand Ensemble Gauntlet ---
-def calculate_metrics(y_true, y_pred):
+def calculate_metrics_ml(y_true, y_pred):
     hits = 0
     for i in range(len(y_true)):
         true_set = set(y_true[i])
@@ -303,7 +276,6 @@ def calculate_metrics(y_true, y_pred):
 
 def run_ml_gauntlet(df, features):
     st.header("🏆 Module 7: The Grand Ensemble Gauntlet (AI/ML)")
-    # ... (code from v5.0, unchanged)
     X = features.iloc[:-1]
     y = df.loc[X.index].shift(-1).dropna().iloc[:, :6]
     X = X.loc[y.index]
@@ -314,7 +286,7 @@ def run_ml_gauntlet(df, features):
         with st.expander(f"**Running: {name}**"):
             trained_models = [model.fit(X_train, y_train.iloc[:, i]) for i in range(6)]
             y_pred = np.round(np.array([m.predict(X_test) for m in trained_models]).T).astype(int)
-            hit_rate = calculate_metrics(y_test.values, y_pred)
+            hit_rate = calculate_metrics_ml(y_test.values, y_pred)
             last_features = features.iloc[-1:]
             final_pred = sorted(np.round([m.predict(last_features)[0] for m in trained_models]).astype(int))
             explainer = shap.TreeExplainer(trained_models[0]); shap_values = explainer.shap_values(X_test)
@@ -336,7 +308,6 @@ def run_fast_simulation(num_players, max_num):
 
 def analyze_game_theory(df):
     st.header("🎲 Module 8: Game Theory & Agent-Based Simulation")
-    # ... (code from v5.0, unchanged)
     with st.spinner("Running agent-based simulation with 10,000 players..."):
         max_num = df.iloc[:,:6].values.max()
         popularity_matrix = run_fast_simulation(10000, max_num)
@@ -388,11 +359,10 @@ if uploaded_file:
         hybrid_pred = sorted([num for num, count in consensus_counts.most_common(6)])
         
         st.subheader("🏆 Celestial Hybrid Consensus Prediction")
-        st.markdown("The numbers that appeared most frequently across **all eight advanced analytical modules**.")
+        st.markdown("The numbers that appeared most frequently across **all eleven advanced analytical modules**.")
         st.success(f"## `{hybrid_pred}`")
         
         st.subheader("Ranked Predictions by Module")
-        # Create a DataFrame for better display
         pred_list = [{'Module': name, 'Prediction': str(result['prediction']), 'Logic': result['logic']} for name, result in all_predictions.items()]
         pred_df = pd.DataFrame(pred_list)
         st.dataframe(pred_df, use_container_width=True)
