@@ -1,5 +1,4 @@
-
-# requirements.txt for LottoSphere v16.0.1
+# requirements.txt for LottoSphere v16.0.2
 # Compatible with Python 3.11
 # Install with: pip install -r requirements.txt
 
@@ -15,6 +14,7 @@ pywavelets==1.7.0
 scipy==1.14.1
 nolds==0.5.2
 torch==2.2.2
+statsmodels==0.14.2
 
 # Notes:
 # - For GPU support, install PyTorch with CUDA manually, e.g.:
