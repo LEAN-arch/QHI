@@ -3,19 +3,15 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 15.2.0 (Definitive Architectural Refactor)
+# VERSION: 15.3.0 (SyntaxError Fix & Finalization)
 #
 # DESCRIPTION:
-# This definitive version is a masterpiece of hybrid intelligence, unifying the Acausal Physics
-# engine with the Stochastic AI Gauntlet. It uses pattern analysis as a powerful meta-feature
-# for the AI models and introduces a rigorous "Efficient Frontier" analysis to identify the
-# optimal predictions that are both historically accurate and currently confident.
+# This is the definitive, commercial-grade version of the LottoSphere engine. It operates as a
+# hybrid intelligence platform, running two parallel analysis suites.
 #
-# VERSION 15.2.0 ENHANCEMENTS:
-# - CRITICAL FIX (NameError): Resolved the fatal `NameError` by re-architecting the script's
-#   layout. All function definitions are now consolidated at the top of the file, ensuring
-#   they are all within scope before being called by the backtesting engine or main UI.
-#   This is the definitive fix for this class of error.
+# VERSION 15.3.0 ENHANCEMENTS:
+# - CRITICAL FIX (SyntaxError): Resolved a fatal `SyntaxError` caused by a missing closing
+#   parenthesis in the main UI logic. This was a basic coding error and has been corrected.
 # =================================================================================================
 
 import streamlit as st
@@ -221,12 +217,11 @@ def run_full_backtest_suite(df):
         y_preds, y_trues = [], []
         for i in range(len(val_df)):
             historical_df = df.iloc[:split_point+i]
-            if len(historical_df) > 1: # Need at least 2 rows for some calcs
+            if len(historical_df) > 1:
                 y_preds.append(func(historical_df)['prediction'])
                 if split_point+i < len(df) -1:
                     y_trues.append(df.iloc[split_point+i+1, :6].tolist())
         
-        # Adjust y_preds to match length of y_trues
         y_preds = y_preds[:len(y_trues)]
 
         if not y_preds: continue
@@ -278,7 +273,7 @@ def run_full_backtest_suite(df):
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("🌌 LottoSphere v15.2: The Grand Unification Engine")
+st.title("🌌 LottoSphere v15.3: The Grand Unification Engine")
 st.markdown("A hybrid intelligence platform that unifies **Acausal Physics** and **Stochastic AI** models to generate a portfolio of optimal, uncertainty-quantified predictions.")
 
 if 'data_warning' not in st.session_state: st.session_state.data_warning = None
@@ -318,4 +313,31 @@ if uploaded_file:
                 
                 consensus_numbers = []
                 for p in portfolio:
-                    weight = int(p['likelihood']
+                    # CRITICAL FIX: Add closing parenthesis
+                    weight = int(p['likelihood']) // 10 if p.get('likelihood', 0) > 0 else 1
+                    consensus_numbers.extend(p['prediction'] * weight)
+                
+                if consensus_numbers:
+                    consensus_counts = Counter(consensus_numbers)
+                    hybrid_pred = sorted([num for num, count in consensus_counts.most_common(6)])
+                    hybrid_error = np.mean([p['error'] for p in portfolio], axis=0)
+                    
+                    with st.container(border=True):
+                        st.subheader("🏆 Prime Candidate: Portfolio Consensus")
+                        pred_str_hybrid = ' | '.join([f"{n} (±{e:.1f})" for n, e in zip(hybrid_pred, hybrid_error)])
+                        st.success(f"## `{pred_str_hybrid}`")
+                
+                st.subheader("Top Performing Models")
+                for p in portfolio:
+                    with st.container(border=True):
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"#### {p['name']}")
+                            pred_str = ' | '.join([f"{n} <small>(±{e:.1f})</small>" for n, e in zip(p['prediction'], p['error'])])
+                            st.markdown(f"**Candidate Set:** {pred_str}", unsafe_allow_html=True)
+                        with col2:
+                            st.metric("Likelihood Score", f"{p.get('likelihood', 0):.1f}%", help=f"Backtest Metrics: {p.get('metrics', {})}")
+    else:
+        st.error(f"Invalid data format. After cleaning, the file must have 6 number columns.")
+else:
+    st.info("Upload a CSV file to engage the Grand Unification Engine.")
