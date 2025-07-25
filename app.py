@@ -3,11 +3,13 @@
 #
 # AUTHOR: Subject Matter Expert AI (Complex Systems, Mathematics & AI/ML)
 # DATE: 2024-07-25
-# VERSION: 15.3.1 (Debugged & Optimized)
+# VERSION: 15.3.2 (Debugged & Optimized with Kalman Filter Fix)
 #
 # DESCRIPTION:
 # A hybrid intelligence platform unifying Acausal Physics and Stochastic AI for lottery predictions.
-# This version fixes bugs, improves error handling, and optimizes performance.
+# This version fixes the NameError for analyze_quantum_fluctuations, the Kalman filter dimension
+# error (dim must be between 2 and 4), and includes robust error handling, data validation, and
+# performance optimizations.
 # =================================================================================================
 
 import streamlit as st
@@ -107,33 +109,49 @@ def feature_engineering(_df):
 @st.cache_data
 def analyze_quantum_fluctuations(_df):
     try:
-        # Placeholder: Kalman filter-based prediction
+        # Kalman filter-based prediction with 2D state space (number and velocity)
         max_num = _df.iloc[:, :6].values.max()
-        kf = KalmanFilter(dim_x=1, dim_z=1)
-        kf.x = np.array([_df.iloc[-1, 0]])
-        kf.F = np.array([[1]])
-        kf.H = np.array([[1]])
-        kf.P *= 1000
-        kf.R = 5
-        kf.Q = Q_discrete_white_noise(dim=1, dt=1, var=0.1)
+        predictions = []
+        for col in _df.iloc[:, :6].columns:
+            kf = KalmanFilter(dim_x=2, dim_z=1)  # 2D state: [number, velocity]
+            kf.x = np.array([[_df[col].iloc[-1]], [0]])  # Initial state: last number, zero velocity
+            kf.F = np.array([[1, 1], [0, 1]])  # State transition: x_t+1 = x_t + v_t, v_t+1 = v_t
+            kf.H = np.array([[1, 0]])  # Measurement: observe only the number
+            kf.P *= 1000  # Initial uncertainty
+            kf.R = 5  # Measurement noise
+            kf.Q = Q_discrete_white_noise(dim=2, dt=1, var=0.1)  # Process noise
+            
+            n_boots = 50
+            boot_preds = []
+            for _ in range(n_boots):
+                sample_df = _df[[col]].sample(frac=0.8, replace=True)
+                kf.x = np.array([[sample_df[col].iloc[-1]], [0]])
+                for z in sample_df[col].values:
+                    kf.predict()
+                    kf.update(z)
+                boot_preds.append(int(round(kf.x[0][0])))
+            prediction = int(round(np.mean(boot_preds)))
+            error = np.std(boot_preds)
+            predictions.append((prediction, error))
         
-        n_boots = 50
-        boot_preds = []
-        for _ in range(n_boots):
-            sample_df = _df.iloc[:, :6].sample(frac=0.8, replace=True)
-            predictions = []
-            for col in sample_df.columns:
-                kf.x = np.array([sample_df[col].iloc[-1]])
-                kf.predict()
-                predictions.append(int(round(kf.x[0])))
-            boot_preds.append(sorted(predictions[:6]))
-        boot_preds = np.array(boot_preds)
-        prediction = np.mean(boot_preds, axis=0).round().astype(int)
-        error = np.std(boot_preds, axis=0)
-        return {'name': 'Quantum Fluctuation', 'prediction': prediction, 'error': error, 'logic': 'Kalman filter-based number tracking.'}
+        # Sort predictions and extract top 6
+        predictions.sort(key=lambda x: x[0])
+        final_predictions = [p[0] for p in predictions[:6]]
+        final_errors = [p[1] for p in predictions[:6]]
+        return {
+            'name': 'Quantum Fluctuation',
+            'prediction': final_predictions,
+            'error': final_errors,
+            'logic': 'Kalman filter-based tracking of number trends with velocity.'
+        }
     except Exception as e:
         st.error(f"Error in quantum fluctuations: {str(e)}")
-        return {'name': 'Quantum Fluctuation', 'prediction': [0]*6, 'error': [0]*6, 'logic': 'Failed due to error.'}
+        return {
+            'name': 'Quantum Fluctuation',
+            'prediction': [0]*6,
+            'error': [0]*6,
+            'logic': 'Failed due to error.'
+        }
 
 @st.cache_data
 def analyze_calculus_momentum(_df):
@@ -153,10 +171,20 @@ def analyze_calculus_momentum(_df):
         boot_preds = np.array(boot_preds)
         prediction = np.mean(boot_preds, axis=0).round().astype(int)
         error = np.std(boot_preds, axis=0)
-        return {'name': 'Calculus Momentum', 'prediction': prediction, 'error': error, 'logic': 'Numbers from slots with highest stable positive momentum.'}
+        return {
+            'name': 'Calculus Momentum',
+            'prediction': prediction,
+            'error': error,
+            'logic': 'Numbers from slots with highest stable positive momentum.'
+        }
     except Exception as e:
         st.error(f"Error in calculus momentum: {str(e)}")
-        return {'name': 'Calculus Momentum', 'prediction': [0]*6, 'error': [0]*6, 'logic': 'Failed due to error.'}
+        return {
+            'name': 'Calculus Momentum',
+            'prediction': [0]*6,
+            'error': [0]*6,
+            'logic': 'Failed due to error.'
+        }
 
 @st.cache_data
 def analyze_stochastic_resonance(_df):
@@ -179,10 +207,20 @@ def analyze_stochastic_resonance(_df):
         boot_preds = np.array(boot_preds)
         prediction = np.mean(boot_preds, axis=0).round().astype(int)
         error = np.std(boot_preds, axis=0)
-        return {'name': 'Stochastic Resonance', 'prediction': prediction, 'error': error, 'logic': 'Numbers with highest energy in the wavelet domain.'}
+        return {
+            'name': 'Stochastic Resonance',
+            'prediction': prediction,
+            'error': error,
+            'logic': 'Numbers with highest energy in the wavelet domain.'
+        }
     except Exception as e:
         st.error(f"Error in stochastic resonance: {str(e)}")
-        return {'name': 'Stochastic Resonance', 'prediction': [0]*6, 'error': [0]*6, 'logic': 'Failed due to error.'}
+        return {
+            'name': 'Stochastic Resonance',
+            'prediction': [0]*6,
+            'error': [0]*6,
+            'logic': 'Failed due to error.'
+        }
 
 @st.cache_data
 def analyze_gmm_inference(_df):
@@ -195,10 +233,20 @@ def analyze_gmm_inference(_df):
         prediction = scaler.inverse_transform(weighted_centers_scaled.reshape(1, -1)).flatten()
         weighted_cov = np.tensordot(last_draw_probs, gmm.covariances_, axes=1)
         error = np.sqrt(np.diag(weighted_cov))
-        return {'name': 'Bayesian GMM Inference', 'prediction': sorted(np.round(prediction).astype(int)), 'error': error, 'logic': 'Weighted average of cluster archetypes.'}
+        return {
+            'name': 'Bayesian GMM Inference',
+            'prediction': sorted(np.round(prediction).astype(int)),
+            'error': error,
+            'logic': 'Weighted average of cluster archetypes.'
+        }
     except Exception as e:
         st.error(f"Error in GMM inference: {str(e)}")
-        return {'name': 'Bayesian GMM Inference', 'prediction': [0]*6, 'error': [0]*6, 'logic': 'Failed due to error.'}
+        return {
+            'name': 'Bayesian GMM Inference',
+            'prediction': [0]*6,
+            'error': [0]*6,
+            'logic': 'Failed due to error.'
+        }
 
 @st.cache_data
 def create_pattern_dataframe(_df):
@@ -262,10 +310,20 @@ def predict_with_ensemble(df, models):
         lower = [m.predict(last_features)[0] for m in models['lower']]
         upper = [m.predict(last_features)[0] for m in models['upper']]
         error = (np.array(upper) - np.array(lower)) / 2.0
-        return {'name': 'Ensemble AI (Pattern-Aware)', 'prediction': prediction, 'error': error, 'logic': 'Quantile Regression on features including the current system state.'}
+        return {
+            'name': 'Ensemble AI (Pattern-Aware)',
+            'prediction': prediction,
+            'error': error,
+            'logic': 'Quantile Regression on features including the current system state.'
+        }
     except Exception as e:
         st.error(f"Error in ensemble prediction: {str(e)}")
-        return {'name': 'Ensemble AI (Pattern-Aware)', 'prediction': [0]*6, 'error': [0]*6, 'logic': 'Failed due to error.'}
+        return {
+            'name': 'Ensemble AI (Pattern-Aware)',
+            'prediction': [0]*6,
+            'error': [0]*6,
+            'logic': 'Failed due to error.'
+        }
 
 # --- 5. BACKTESTING & SCORING ---
 @st.cache_data
@@ -366,7 +424,7 @@ def run_full_backtest_suite(df):
 # Main Application UI & Logic
 # =================================================================================================
 
-st.title("🌌 LottoSphere v15.3.1: The Grand Unification Engine")
+st.title("🌌 LottoSphere v15.3.2: The Grand Unification Engine")
 st.markdown("A hybrid intelligence platform that unifies **Acausal Physics** and **Stochastic AI** models to generate a portfolio of optimal, uncertainty-quantified predictions.")
 
 if 'data_warning' not in st.session_state:
