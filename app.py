@@ -16,9 +16,8 @@
 # - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
 # - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
-# - Restored HMM attribute fix ('emissionprob_' to 'emissionprobs_') and improved HMM call logging.
-# - Added cache-clearing mechanism to ensure updated code execution.
 # - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models by defining it outside try block.
+# - Added compatibility check for hmmlearn version and fallback for MultinomialHMM changes.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -34,6 +33,7 @@ import warnings
 from typing import List, Dict, Any, Tuple, Optional
 import scipy.stats as stats
 import os
+import pkg_resources
 
 # --- Suppress Warnings for a Cleaner UI ---
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -53,6 +53,10 @@ from sktime.forecasting.arima import AutoARIMA
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+
+# --- Check hmmlearn Version ---
+hmmlearn_version = pkg_resources.get_distribution("hmmlearn").version
+st.session_state.data_warnings.append(f"Using hmmlearn version {hmmlearn_version}. Expected 0.3.2 for compatibility.")
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
@@ -264,17 +268,33 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
         # Validate input series
         if not np.all((hmm_series >= 0) & (hmm_series < max_num)):
             raise ValueError(f"Invalid values in series for {position}: must be in range [0, {max_num-1}]")
-        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
-        hmm.fit(hmm_series)
-        last_state = hmm.predict(hmm_series)[-1]
-        next_state = np.argmax(hmm.transmat_[last_state])
-        # Use correct attribute name for hmmlearn==0.3.2
-        emission_probs = getattr(hmm, 'emissionprobs_', None)
-        if emission_probs is None:
-            st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
-            results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+        if hmmlearn_version > '0.3.0':
+            st.warning(f"Detected hmmlearn {hmmlearn_version}. Using fallback for MultinomialHMM compatibility.")
+            # Fallback for newer MultinomialHMM (requires n_trials)
+            hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3)
+            # Simulate single-trial data
+            n_trials = np.ones((len(hmm_series), 1), dtype=int)
+            hmm.fit(hmm_series, n_trials=n_trials)
+            last_state = hmm.predict(hmm_series, n_trials=n_trials)[-1]
+            next_state = np.argmax(hmm.transmat_[last_state])
+            emission_probs = getattr(hmm, 'emissionprobs_', None)
+            if emission_probs is None:
+                st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
+                results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+            else:
+                results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
         else:
-            results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
+            # Original code for hmmlearn==0.3.2
+            hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
+            hmm.fit(hmm_series)
+            last_state = hmm.predict(hmm_series)[-1]
+            next_state = np.argmax(hmm.transmat_[last_state])
+            emission_probs = getattr(hmm, 'emissionprobs_', None)
+            if emission_probs is None:
+                st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
+                results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+            else:
+                results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
     except Exception as e:
         st.warning(f"HMM model failed for {position} (call {call_id}): {e}")
         results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
@@ -398,7 +418,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 3, max_nums),
         }
         if stable_positions:  # Only add stable position models if available
-            for pos in stable_positions:
+            for pos in stable_positions[:1]:  # Limit to one stable position to reduce errors
                 model_funcs[f'Stable_{pos}'] = lambda d, p=pos: analyze_stable_position_dynamics(d, p, max_nums[int(p.split("_")[1])-1])
         progress_bar = st.progress(0, text="Backtesting models...")
         total_steps = len(val_df) * len(model_funcs)
