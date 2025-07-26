@@ -238,7 +238,6 @@ class BayesianLSTMModel(BaseSequenceModel):
         return _HybridBayesianLSTM()
     def train(self, df: pd.DataFrame):
         if not bnn: raise RuntimeError("torchbnn library is not installed.")
-        # Need to call BaseSequenceModel train logic but with a custom loss function
         if len(df) < self.min_data_length:
             raise ValueError(f"Data size ({len(df)}) is less than minimum required ({self.min_data_length}).")
         self.scaler = MinMaxScaler()
@@ -392,7 +391,132 @@ class ModelFactory:
         return available, skipped
 
 # --- 4. OPTIMIZED BACKTESTING & CACHING ---
-# [Re-implemented stable code for run_full_backtest, find_stabilization_point, analyze_clusters]
+def get_data_hash(df: pd.DataFrame) -> str:
+    return hashlib.sha256(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
+
+@st.cache_resource(ttl=3600)
+def get_or_train_model(_model_class, _training_df, _model_params, _cache_key):
+    model = _model_class(**_model_params)
+    model.train(_training_df)
+    return model
+
+def run_full_backtest(df: pd.DataFrame, train_size: int, backtest_steps: int, max_nums_input: list):
+    results = {}
+    df_main, df_pos6 = df.iloc[:, :5], df.iloc[:, 5]
+    model_definitions = {}
+    if bnn: model_definitions["Bayesian LSTM"] = (BayesianLSTMModel, {'max_nums': max_nums_input})
+    model_definitions["Transformer"] = (TransformerModel, {'max_nums': max_nums_input})
+    pos6_model_class, pos6_params = UnivariateEnsembleModel, {'max_nums': max_nums_input}
+    for name, (model_class, model_params) in model_definitions.items():
+        with st.spinner(f"Backtesting {name}..."):
+            log_losses, uncertainties = [], []
+            initial_train_main = df_main.iloc[:train_size]
+            initial_train_pos6 = df_pos6.iloc[:train_size]
+            try:
+                main_model = model_class(**model_params)
+                main_model.train(initial_train_main)
+                pos6_model = pos6_model_class(**pos6_params)
+                pos6_model.train(initial_train_pos6)
+                for i in range(backtest_steps):
+                    step = train_size + i
+                    if step >= len(df): break
+                    true_draw = df.iloc[step].values
+                    pred_obj_main = main_model.predict(full_history=df.iloc[:step])
+                    pred_obj_pos6 = pos6_model.predict(full_history=df.iloc[:step])
+                    if not pred_obj_main.get('distributions') or not pred_obj_pos6.get('distributions'): continue
+                    all_distributions = pred_obj_main['distributions'] + pred_obj_pos6['distributions']
+                    if 'uncertainty' in pred_obj_main: uncertainties.append(pred_obj_main['uncertainty'])
+                    step_log_loss = sum(-np.log(dist.get(true_draw[pos_idx], 1e-9)) for pos_idx, dist in enumerate(all_distributions))
+                    log_losses.append(step_log_loss)
+                full_max_nums = model_params['max_nums']
+                avg_log_loss = np.mean(log_losses) if log_losses else np.log(np.mean(full_max_nums))
+                likelihood = 100 * np.exp(-avg_log_loss / np.log(np.mean(full_max_nums)))
+                metrics = {'Log Loss': f"{avg_log_loss:.3f}", 'Likelihood': f"{likelihood:.1f}%"}
+                if uncertainties: metrics['BNN Uncertainty'] = f"{np.mean(uncertainties):.3f}"
+                results[name] = metrics
+            except (ValueError, RuntimeError) as e:
+                st.warning(f"Could not backtest {name}: {e}")
+                results[name] = None
+    return results
+
+# --- 5. STABILITY & DYNAMICS ANALYSIS FUNCTIONS ---
+@st.cache_data
+def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_steps: int) -> go.Figure:
+    if not AutoARIMA: return go.Figure().update_layout(title_text="Stabilization Analysis Disabled")
+    df_pos1 = _df.iloc[:, 0]
+    max_num_pos1 = _max_nums[0]
+    window_sizes = np.linspace(50, max(250, len(df_pos1) - backtest_steps - 1), 10, dtype=int)
+    results = []
+    progress_bar = st.progress(0, "Running stabilization analysis...")
+    for i, size in enumerate(window_sizes):
+        if len(df_pos1) < size + backtest_steps: continue
+        log_losses, predictions = [], []
+        for step in range(backtest_steps):
+            series = df_pos1.iloc[:size + step]
+            true_val = df_pos1.iloc[size + step]
+            try:
+                model = AutoARIMA(sp=1, suppress_warnings=True, maxiter=50)
+                model.fit(series)
+                pred_mean = model.predict(fh=[1])[0]
+                pred_std = np.std(series) * 1.5
+                x_range = np.arange(1, max_num_pos1 + 1)
+                prob_mass = stats.norm.pdf(x_range, loc=pred_mean, scale=max(1.0, pred_std))
+                prob_dist = {num: p for num, p in zip(x_range, prob_mass / prob_mass.sum())}
+                prob_of_true = prob_dist.get(true_val, 1e-9)
+                log_losses.append(-np.log(prob_of_true))
+                predictions.append(pred_mean)
+            except Exception: log_losses.append(np.log(max_num_pos1))
+        avg_log_loss = np.mean(log_losses)
+        psi = np.std(predictions) / (np.mean(predictions) + 1e-9) if predictions else float('nan')
+        results.append({'Window Size': size, 'Cross-Entropy Loss': avg_log_loss, 'Prediction Stability Index': psi})
+        progress_bar.progress((i + 1) / len(window_sizes))
+    progress_bar.empty()
+    if not results: return go.Figure().update_layout(title_text="Insufficient data for stabilization analysis.")
+    results_df = pd.DataFrame(results).dropna()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=results_df['Window Size'], y=results_df['Cross-Entropy Loss'], mode='lines+markers', name='Cross-Entropy Loss'))
+    fig.add_trace(go.Scatter(x=results_df['Window Size'], y=results_df['Prediction Stability Index'], mode='lines+markers', name='Prediction Stability Index', yaxis='y2'))
+    fig.update_layout(title='Model Stabilization Analysis (on Pos 1)', xaxis_title='Training Window Size', yaxis_title='Cross-Entropy Loss', yaxis2=dict(title='Prediction Stability Index', overlaying='y', side='right'))
+    return fig
+
+@st.cache_data
+def analyze_clusters(_df: pd.DataFrame, min_cluster_size: int, min_samples: int) -> Dict[str, Any]:
+    df_main = _df.iloc[:, :5]
+    results = {'fig': go.Figure(), 'summary': "Clustering disabled or failed."}
+    if not hdbscan or not umap or len(df_main) < min_cluster_size: return results
+    data = df_main.values
+    try:
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples)
+        labels = clusterer.fit_predict(data)
+        if len(set(labels)) > 1 and -1 in labels:
+            clean_labels = labels[labels != -1]
+            if len(set(clean_labels)) > 1:
+                clean_data = data[labels != -1]
+                score = silhouette_score(clean_data, clean_labels)
+                results['silhouette'] = f"{score:.3f}"
+            else: results['silhouette'] = "N/A (1 cluster)"
+        else: results['silhouette'] = "N/A"
+        reducer = umap.UMAP(n_neighbors=15, n_components=2, min_dist=0.1, random_state=42)
+        embedding = reducer.fit_transform(data)
+        plot_df = pd.DataFrame(embedding, columns=['UMAP_1', 'UMAP_2'])
+        plot_df['Cluster'] = [str(l) for l in labels]
+        plot_df['Draw'] = df_main.index
+        plot_df['Numbers'] = df_main.apply(lambda row: ', '.join(row.astype(str)), axis=1)
+        fig = px.scatter(plot_df, x='UMAP_1', y='UMAP_2', color='Cluster', custom_data=['Draw', 'Numbers'],
+                         title=f'Latent Space of Draws (Pos 1-5), Silhouette: {results.get("silhouette", "N/A")}',
+                         color_discrete_map={'-1': 'grey'})
+        fig.update_traces(hovertemplate='<b>Draw %{customdata[0]}</b><br>Numbers: %{customdata[1]}<br>Cluster: %{marker.color}')
+        results['fig'] = fig
+        summary_text = ""
+        cluster_counts = Counter(labels)
+        for cluster_id, count in sorted(cluster_counts.items()):
+            if cluster_id == -1: summary_text += f"- **Noise Points:** {count} draws.\n"
+            else:
+                cluster_mean = df_main[labels == cluster_id].mean().round().astype(int).tolist()
+                summary_text += f"- **Cluster {cluster_id}:** {count} draws. Centroid: `{cluster_mean}`\n"
+        results['summary'] = summary_text
+    except Exception as e: results['summary'] = f"An error occurred: {e}"
+    return results
 
 # --- 6. MAIN APPLICATION UI & LOGIC ---
 st.sidebar.header("1. System Configuration")
@@ -430,8 +554,7 @@ if uploaded_file:
             else:
                 backtest_results = {}
                 if analysis_mode == "Run Full Backtest":
-                    # Placeholder for backtest logic
-                    pass
+                    backtest_results = run_full_backtest(df, training_size_slider, backtest_steps_slider, max_nums_input)
 
                 cols = st.columns(len(available_models))
                 for i, (name, (model_class, model_params)) in enumerate(available_models.items()):
@@ -452,11 +575,19 @@ if uploaded_file:
                                 st.code(" | ".join(map(str, final_prediction)))
 
                                 if analysis_mode == "Run Full Backtest":
-                                    # Placeholder for metric display
-                                    st.info("Backtest metrics would be shown here.")
+                                    if name in backtest_results and backtest_results[name] is not None:
+                                        metrics = backtest_results[name]
+                                        m_cols = st.columns(2)
+                                        m_cols[0].metric("Likelihood Score", metrics['Likelihood'])
+                                        if 'BNN Uncertainty' in metrics:
+                                            m_cols[1].metric("BNN Uncertainty", metrics['BNN Uncertainty'], help="Model uncertainty for Pos 1-5. Lower is better.")
+                                        else:
+                                            m_cols[1].metric("Cross-Entropy", metrics['Log Loss'])
+                                    else:
+                                        st.warning("Backtest failed for this model. This is often due to an insufficient 'Training Window Size' for the given model.")
                             except (ValueError, RuntimeError) as e:
                                 st.error(f"Prediction Failed: {e}")
-        # Placeholder for other tabs
+        # [Placeholder for other tabs]
         with tab2:
             st.header("Graph Dynamics (Placeholder)")
         with tab3:
