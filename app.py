@@ -16,6 +16,7 @@
 # - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
 # - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
+# - Restored HMM attribute fix ('emissionprob_' to 'emissionprobs_') and added logging for HMM calls.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -58,6 +59,8 @@ st.set_page_config(
 )
 if 'data_warnings' not in st.session_state:
     st.session_state.data_warnings = []
+if 'hmm_calls' not in st.session_state:
+    st.session_state.hmm_calls = 0
 
 np.random.seed(42)
 torch.manual_seed(42)
@@ -245,6 +248,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
     try:
+        st.session_state.hmm_calls += 1
         hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
         hmm.fit(hmm_series)
         last_state = hmm.predict(hmm_series)[-1]
@@ -252,12 +256,12 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
         # Use correct attribute name for hmmlearn==0.3.2
         emission_probs = getattr(hmm, 'emissionprobs_', None)
         if emission_probs is None:
-            st.warning("HMM emission probabilities not available.")
+            st.warning(f"HMM emission probabilities not available (call {st.session_state.hmm_calls}).")
             results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         else:
             results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
     except Exception as e:
-        st.warning(f"HMM model failed: {e}")
+        st.warning(f"HMM model failed (call {st.session_state.hmm_calls}): {e}")
         results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
     return results
 
@@ -409,6 +413,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
             scored_predictions.append(final_pred_obj)
         progress_bar.empty()
+        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {st.session_state.hmm_calls}")
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
     except Exception as e:
         st.error(f"Error in backtesting suite: {e}")
