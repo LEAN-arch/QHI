@@ -1,5 +1,5 @@
 # Core Streamlit & Data Handling
-streamlit>=1.28.0
+streamlit>=1.33.0
 pandas>=2.0.0
 numpy>=1.24.0
 
@@ -12,13 +12,13 @@ scikit-learn>=1.3.0
 
 # Time Series, Forecasting & Other Models
 sktime>=0.25.0
+pmdarima>=2.0.0
 statsmodels>=0.14.0
 hmmlearn>=0.3.0
-nolds>=0.5.2
 
 # Machine Learning (Deep Learning & Bayesian)
-# Installs CPU version of PyTorch by default
-torch --index-url https://download.pytorch.org/whl/cpu
+# Corrected, uv-compliant format for PyTorch
+torch @ https://download.pytorch.org/whl/cpu/torch-2.1.0%2Bcpu-cp311-cp311-linux_x86_64.whl
 torchbnn>=1.1
 
 # Graph Theory
