@@ -1,9 +1,9 @@
 # ======================================================================================================
-# LottoSphere v16.0.11: The Quantum Chronodynamics Engine (Final)
+# LottoSphere v16.0.12: The Quantum Chronodynamics Engine (Final)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.11 (Final)
+# VERSION: 16.0.12 (Final)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -11,10 +11,10 @@
 # clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
 # robust backtesting methodology for single-position models.
 #
-# CHANGELOG (from v16.0.10 to v16.0.11):
-# - FIXED: Corrected an IndexError in MCMC analysis by properly passing the position-specific
-#   `max_num` to the underlying statistical physics function.
-# - DEPENDENCY: Added `pmdarima` to requirements to support sktime's AutoARIMA.
+# CHANGELOG (from v16.0.11 to v16.0.12):
+# - FIXED: Added a re-normalization step in the MCMC sampling to prevent "probabilities do not sum to 1"
+#   errors caused by floating-point inaccuracies.
+# - DEPENDENCY: Pinned scipy version to be compatible with pmdarima.
 # ======================================================================================================
 
 import streamlit as st
@@ -55,7 +55,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.11: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.12: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -78,21 +78,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
     """
     Loads, validates, and preprocesses the lottery data from a CSV file.
-    - Validates number ranges and uniqueness.
-    - Sorts each row to create stable positional time series.
-    - Handles and reports data quality issues.
     """
     try:
         df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
         st.session_state.data_warnings = []
 
-        # Ensure numeric types and drop rows with non-numeric values
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         df.dropna(inplace=True)
         df = df.astype(int)
 
-        # Validate number range (1–max_nums[i]) for each position
         initial_rows = len(df)
         for i, max_num in enumerate(max_nums):
             if i < df.shape[1]:
@@ -102,7 +97,6 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
                 f"Discarded {initial_rows - len(df)} rows with numbers outside the specified max range."
             )
 
-        # Check for duplicates within rows
         num_cols = min(6, df.shape[1])
         df = df.iloc[:, :num_cols]
         unique_counts = df.apply(lambda x: len(set(x)), axis=1)
@@ -113,7 +107,6 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
             )
             df = df[valid_rows_mask]
 
-        # Check for duplicate rows (entire draws)
         if df.duplicated().any():
             st.session_state.data_warnings.append(f"Discarded {df.duplicated().sum()} duplicate rows.")
             df = df.drop_duplicates()
@@ -125,7 +118,6 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
             st.session_state.data_warnings.append("Insufficient data for robust analysis (at least 50 rows required).")
             return pd.DataFrame()
 
-        # Sort each row to create stable positional time series (critical step)
         st.session_state.data_warnings.append("Input data sorted per row to create positional time series. Last rows are treated as most recent draws.")
         sorted_values = np.sort(df.values, axis=1)
         return pd.DataFrame(sorted_values, columns=df.columns).astype(int)
@@ -151,28 +143,23 @@ def create_sequences(data: np.ndarray, seq_length: int) -> Tuple[np.ndarray, np.
 def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dict[str, Any]:
     """
     Analyzes the chaotic and cyclical nature of a single positional time series.
-    Calculates Recurrence Plot, Power Spectrum, Spectrogram, and Lyapunov Exponent.
     """
     try:
         results = {}
         series = _df[position].values
 
-        # Recurrence Plot
         recurrence_matrix = np.abs(np.subtract.outer(series, series))
         normalized_recurrence = recurrence_matrix / (recurrence_matrix.max() + 1e-10)
         results['recurrence_fig'] = px.imshow(normalized_recurrence, color_continuous_scale='viridis', title=f"Recurrence Plot ({position})")
 
-        # Fourier Analysis (Power Spectral Density)
         freqs, psd = welch(series, nperseg=min(len(series), 256))
         psd_df = pd.DataFrame({'Frequency': freqs, 'Power': psd}).sort_values('Power', ascending=False)
         results['fourier_fig'] = px.line(psd_df, x='Frequency', y='Power', title=f"Power Spectral Density ({position})")
 
-        # Spectrogram
         f, t, Sxx = spectrogram(series, fs=1.0, nperseg=min(128, len(series)//2), noverlap=int(min(128, len(series)//2)*0.9))
         results['spectrogram_fig'] = go.Figure(data=go.Heatmap(z=10 * np.log10(Sxx + 1e-10), x=t, y=f, colorscale='viridis'))
         results['spectrogram_fig'].update_layout(title=f'Spectrogram ({position})', xaxis_title='Time', yaxis_title='Frequency')
 
-        # Lyapunov Exponent
         try:
             lyap_exp = lyap_r(series, emb_dim=3, lag=1, min_tsep=len(series)//10)
             results['lyapunov'] = lyap_exp
@@ -181,7 +168,6 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
             results['lyapunov'] = -1
             results['is_stable'] = True
 
-        # Periodicity Analysis for stable positions
         if results['is_stable']:
             acf_vals = acf(series, nlags=min(50, len(series)//2 - 1), fft=True)
             lags = np.arange(len(acf_vals))
@@ -211,28 +197,27 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
 def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     """Sub-module for Statistical Physics and Complex Systems analysis."""
     results = {}
-    # MCMC
     counts = np.zeros((max_num, max_num))
     for i in range(len(series)-1):
-        # FIXED: Add boundary checks to prevent IndexError
         from_idx, to_idx = series[i]-1, series[i+1]-1
         if 0 <= from_idx < max_num and 0 <= to_idx < max_num:
             counts[from_idx, to_idx] += 1
             
     trans_prob = (counts + 1e-10) / (counts.sum(axis=1, keepdims=True) + 1e-9)
     current_state = series[-1] - 1
-    # Ensure current_state is valid before using it
     if not (0 <= current_state < max_num):
-        # Handle edge case where last number is out of expected range
         current_state = np.random.randint(0, max_num)
         
-    mcmc_samples = [np.random.choice(max_num, p=trans_prob[current_state]) for _ in range(2000)]
+    # FIXED: Re-normalize the probability vector to ensure it sums to 1
+    prob_vector = trans_prob[current_state]
+    prob_vector /= prob_vector.sum()
+    
+    mcmc_samples = [np.random.choice(max_num, p=prob_vector) for _ in range(2000)]
     mcmc_dist = pd.Series(c + 1 for c in mcmc_samples).value_counts(normalize=True).sort_index()
     results['mcmc_fig'] = px.bar(x=mcmc_dist.index, y=mcmc_dist.values, title="MCMC Number Distribution")
     results['mcmc_pred'] = int(mcmc_dist.idxmax())
     results['trans_prob'] = trans_prob
 
-    # Fokker-Planck
     drift = np.diff(series).mean()
     diffusion = np.diff(series).var() / 2.0
     p = np.ones(max_num) / max_num
@@ -255,7 +240,6 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
 def _analyze_ml_models(series: np.ndarray, max_num: int, seq_length: int = 3) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
-    # BNN
     scaler = MinMaxScaler()
     scaled_series = scaler.fit_transform(series.reshape(-1, 1))
     X, y = create_sequences(scaled_series, seq_length)
@@ -270,7 +254,6 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, seq_length: int = 3) ->
     bnn_pred = int(np.clip(np.round(scaler.inverse_transform(bnn_pred_scaled.reshape(-1, 1)).item()), 1, max_num))
     results['bnn_pred'] = bnn_pred
 
-    # HMM
     hmm_series = (series - 1).reshape(-1, 1)
     hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
     hmm.fit(hmm_series)
@@ -284,33 +267,26 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, seq_length: int = 3) ->
 @st.cache_data
 def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: int) -> Dict[str, Any]:
     """
-    Performs a deep dive analysis on a single stable position using a battery of advanced techniques.
-    This function is a coordinator for various modular analysis sub-functions.
+    Performs a deep dive analysis on a single stable position.
     """
     try:
         results = {}
         series = _df[position].values
         
-        # --- 1. Statistical Physics & Complex Systems ---
-        # FIXED: Pass the correct max_num to the sub-function
         stat_phys_results = _analyze_stat_physics(series, max_num)
         results.update(stat_phys_results)
 
-        # --- 2. Time Series Analysis ---
         sarima_model = AutoARIMA(sp=1, suppress_warnings=True)
         sarima_model.fit(series)
         sarima_pred = int(np.clip(np.round(sarima_model.predict(fh=[1]).iloc[0]), 1, max_num))
         results['sarima_pred'] = sarima_pred
 
-        # --- 3. Machine Learning ---
         ml_results = _analyze_ml_models(series, max_num)
         results.update(ml_results)
 
-        # --- 4. Information Theory ---
         hist, _ = np.histogram(series, bins=max_num, range=(1, max_num+1), density=True)
         results['shannon_entropy'] = -np.sum(hist * np.log2(hist + 1e-12))
 
-        # --- 5. Cognitive Computing (Simple Ensemble) ---
         preds = [results['mcmc_pred'], results['sarima_pred'], results['bnn_pred'], results['hmm_pred']]
         fuzzy_pred = int(np.clip(np.round(np.mean(preds)), 1, max_num))
         results['fuzzy_pred'] = fuzzy_pred
@@ -385,7 +361,6 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
         prediction_raw = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
         prediction = np.round(prediction_raw).astype(int)
 
-        # Optimized uniqueness logic
         clipped_preds = [np.clip(p, 1, max_nums[i]) for i, p in enumerate(prediction)]
         final_preds = []
         seen = set()
@@ -542,17 +517,15 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.11: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.12: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
-# --- Sidebar Configuration ---
 st.sidebar.header("Configuration")
 seq_length = st.sidebar.slider("Sequence Length (for DL Models)", min_value=3, max_value=8, value=4, help="How many past draws to use for predicting the next one.")
 max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=150, value=49 + (i * 2), key=f"max_num_pos_{i+1}") for i in range(6)]
 epochs = st.sidebar.slider("Training Epochs", min_value=50, max_value=200, value=100, help="Number of training cycles for deep learning models.")
 uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="CSV file with one draw per row, numbers in columns. Most recent draw should be the last row.")
 
-# --- Main Panel ---
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
     
@@ -579,7 +552,7 @@ if uploaded_file:
                 - **Model Types**:
                     - **LSTM/GRU**: Advanced neural networks for time-series forecasting.
                     - **Hilbert Embedding**: A quantum-inspired geometric model.
-                    - **Stable Models**: For positions identified as 'stable' (predictable), a specialized ensemble prediction is generated, leveraging techniques from statistical physics and machine learning.
+                    - **Stable Models**: For positions identified as 'stable' (predictable), a specialized ensemble prediction is generated.
                 - **Actionability**: Focus on models with a Likelihood Score > 50%. Consider combining numbers from the top 2-3 models for a diversified strategy.
                 """)
 
@@ -608,7 +581,7 @@ if uploaded_file:
 
             with st.expander("What am I looking at?"):
                 st.markdown("""
-                This tool dissects the time series of a single number position (e.g., the lowest number in each draw, `Pos_1`).
+                This tool dissects the time series of a single number position.
                 - **Recurrence Plot**: Visualizes when the system returns to a previous state. Dense patterns suggest predictability.
                 - **Power Spectral Density**: Shows dominant cycles. A high peak might indicate a recurring pattern over a certain number of draws.
                 - **Spectrogram**: Shows how these cycles change over time.
