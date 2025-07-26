@@ -1,3 +1,4 @@
+# Corrected requirements.txt
 # Core Streamlit & Data Handling
 streamlit>=1.33.0
 pandas>=2.0.0
