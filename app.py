@@ -1,7 +1,7 @@
 # ======================================================================================================
-# LottoSphere v17.0.5: The Quantum Chronodynamics Engine (Final Corrected)
+# LottoSphere v17.0.6: The Quantum Chronodynamics Engine (Final Corrected)
 #
-# VERSION: 17.0.5 (Final Corrected)
+# VERSION: 17.0.6 (Final Corrected)
 #
 # DESCRIPTION:
 # This is the final, stable, and feature-complete version of the application, incorporating
@@ -11,15 +11,14 @@
 # and robust error handling for stable operation.
 #
 # CHANGELOG:
-# - v17.0.5: Fixed SARIMA error 'unsupported format string passed to numpy.ndarray.format' by ensuring scalar pred_point.
-# - Enhanced SARIMA error handling with detailed logging of input series and failure reasons.
-# - Improved get_best_guess_set to randomize uniform distribution selections to avoid 1-2-3-4-5-6.
-# - Strengthened load_data to reject CSVs with non-numeric values or insufficient unique draws.
-# - Added logging for SARIMA inputs and outputs in analyze_stable_position_dynamics.
-# - Adjusted likelihood score calculation to reduce uniform distribution impact.
-# - Fixed zero likelihood scores by debugging log loss in run_full_backtest_suite.
-# - Fixed identical 1-2-3-4-5-6 outputs for stable positions.
-# - Enhanced get_best_guess_set to prioritize high-probability numbers.
+# - v17.0.6: Fixed SARIMA error 'unsupported format string passed to numpy.ndarray.format' by extracting scalar pred_point and conf_int.
+# - Enhanced SARIMA error handling with series statistics logging (mean, std, unique values).
+# - Improved get_best_guess_set with stronger randomization for uniform distributions.
+# - Strengthened load_data to check for low variance and non-unique values.
+# - Adjusted SARIMA parameters (sp=1, maxiter=100) for stability.
+# - Updated requirements.txt for compatible versions (numpy=1.26.4, sktime=0.30.1).
+# - Fixed zero likelihood scores by refining log loss handling.
+# - Fixed identical 1-2-3-4-5-6 outputs with randomization in get_best_guess_set.
 # - Added detailed logging for distributions, prob_of_true, and y_true.
 # - Fixed Markov Chain failure for Pos_6 by clipping series.
 # - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
@@ -63,7 +62,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v17.0.5: Quantum Chronodynamics",
+    page_title="LottoSphere v17.0.6: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -135,6 +134,12 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
             st.session_state.data_warnings.append(f"Discarded {df.duplicated().sum()} duplicate rows.")
             df = df.drop_duplicates()
 
+        # Check for low variance
+        for i, col in enumerate(df.columns):
+            if df[col].std() < 1.0:
+                st.session_state.data_warnings.append(f"Low variance in {col}: std={df[col].std():.2f}. Data may be too uniform.")
+                return pd.DataFrame()
+
         df = df.reset_index(drop=True)
         df.columns = [f'Pos_{i+1}' for i in range(df.shape[1])]
 
@@ -173,23 +178,23 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
     seen = set()
     if len(distributions) != 6:
         st.session_state.data_warnings.append(f"Expected 6 distributions, got {len(distributions)}. Using uniform distributions.")
-        distributions = [{i: 1/float(max_num) for i in range(1, max_num + 1)} for max_num in max_nums[:6]]
+        distributions = [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums[:6]]
     
     for i, dist in enumerate(distributions[:6]):
         if not dist or not all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
             st.session_state.data_warnings.append(f"Invalid distribution for Pos_{i+1}: {dist}. Using uniform distribution.")
-            dist = {j: 1/float(max_nums[i]) for j in range(1, max_nums[i] + 1)}
+            dist = {j: 1/max_num for j in range(1, max_num + 1)}
         total_prob = sum(dist.values())
         if total_prob == 0 or np.isnan(total_prob):
             st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{i+1}: {total_prob}. Using uniform distribution.")
-            dist = {j: 1/float(max_nums[i]) for j in range(1, max_nums[i] + 1)}
+            dist = {j: 1/max_num for j in range(1, max_num + 1)}
         else:
             dist = {k: v/total_prob for k, v in dist.items()}
         
         # Shuffle keys for uniform distributions to avoid predictable 1-6
         numbers = list(dist.keys())
         np.random.shuffle(numbers)
-        sorted_dist = sorted([(num, dist[num]) for num in numbers], key=lambda x: (-x[1], x[0]))
+        sorted_dist = sorted([(num, dist[num]) for num in numbers], key=lambda x: (-x[1], np.random.random()))
         
         for num, prob in sorted_dist:
             if num not in seen and 1 <= num <= max_nums[i]:
@@ -199,7 +204,7 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
         else:
             available = sorted(set(range(1, max_nums[i] + 1)) - seen)
             if available:
-                guess = np.random.choice(available)  # Randomize to avoid lowest number
+                guess = np.random.choice(available)
                 best_guesses.append(guess)
                 seen.add(guess)
             else:
@@ -339,7 +344,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
             trans_matrix[from_state, to_state] += 1
         trans_matrix += 1e-10
         row_sums = trans_matrix.sum(axis=1, keepdims=True)
-        trans_matrix = np.where(row_sums > 0, trans_matrix / row_sums, 1/float(max_num))
+        trans_matrix = np.where(row_sums > 0, trans_matrix / row_sums, 1/max_num)
         last_state = int(series[-1]) if 0 <= int(series[-1]) < max_num else 0
         prob_dist = trans_matrix[last_state]
         prob_dist = np.clip(prob_dist, 1e-10, 1)
@@ -349,9 +354,9 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
         
     except Exception as e:
         st.error(f"Markov Chain failed for {position} (ID: {call_id}): {e}")
-        results['markov_dist'] = {i: 1/float(max_num) for i in range(1, max_num + 1)}
+        results['markov_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
     
-    results['hmm_dist'] = results.pop('markov_dist', {i: 1/float(max_num) for i in range(1, max_num + 1)})
+    results['hmm_dist'] = results.pop('markov_dist', {i: 1/max_num for i in range(1, max_num + 1)})
     return results
 
 @st.cache_data
@@ -361,9 +366,14 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         st.session_state.data_warnings.append(f"Analyzing {position}: max_num={max_num}")
         results = {}
         series = _df[position].values.astype(int)
-        if not all(1 <= x <= max_num for x in series)):
+        if not all(1 <= x <= max_num for x in series):
             st.session_state.data_warnings.append(f"Invalid values in {position} series: {series[:5]}... Clipping to [1, {max_num}]")
             series = np.clip(series, 1, max_num)
+        
+        # Log series statistics
+        st.session_state.data_warnings.append(
+            f"{position} series stats: len={len(series)}, mean={series.mean():.2f}, std={series.std():.2f}, unique={len(np.unique(series))}"
+        )
         
         stat_phys_results = _analyze_stat_physics(series, max_num)
         results.update(stat_phys_results)
@@ -371,13 +381,15 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         try:
             if len(series) < 10:
                 raise ValueError(f"Series for {position} too short: {len(series)} < 10")
+            if len(np.unique(series)) < 5:
+                raise ValueError(f"Series for {position} has too few unique values: {len(np.unique(series))}")
             st.session_state.data_warnings.append(f"SARIMA input for {position}: {series[:5]}..., len={len(series)}")
-            sarima_model = AutoARIMA(sp=6, suppress_warnings=True, maxiter=50)
+            sarima_model = AutoARIMA(sp=1, suppress_warnings=True, maxiter=100)
             sarima_model.fit(series)
             pred_series = sarima_model.predict(fh=[1])
-            pred_point = float(pred_series[0]) if isinstance(pred_series, (pd.Series, np.ndarray)) else float(pred_series)
+            pred_point = float(pred_series.iloc[0] if isinstance(pred_series, pd.Series) else pred_series[0])
             conf_int = sarima_model.predict_interval(fh=[1], coverage=0.95)
-            std_dev = float(max(0.1, (conf_int.iloc[0, 1] - float(conf_int.iloc[0, 0])) / 3.92))
+            std_dev = float(max(0.1, (conf_int.iloc[0, 1] - conf_int.iloc[0, 0]) / 3.92))
             x_range = np.arange(1, max_num + 1)
             prob_mass = stats.norm.pdf(x_range, loc=pred_point, scale=std_dev)
             prob_mass = np.clip(prob_mass, 1e-10, 1)
@@ -386,13 +398,14 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
             st.session_state.data_warnings.append(f"SARIMA for {position}: Pred={pred_point:.2f}, StdDev={std_dev:.2f}, Top 5 probs={sorted(results['sarima_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
         except Exception as e:
             st.warning(f"SARIMA failed for {position}: {e}. Using uniform distribution.")
-            results['sarima_dist'] = {i: 1/float(max_num) for i in range(1, max_num + 1)}
+            results['sarima_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         
         ml_results = _analyze_ml_models(series, max_num, position)
         results.update(ml_results)
         
         all_dists = [results.get('mcmc_dist', {}), results.get('sarima_dist', {}), results.get('hmm_dist', {})]
         ensemble_dist = {i: 0.0 for i in range(1, max_num + 1)}
+        valid_dists = 0
         for dist in all_dists:
             if not dist:
                 st.session_state.data_warnings.append(f"Empty distribution in ensemble for {position}")
@@ -401,17 +414,18 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
             if total_prob == 0 or np.isnan(total_prob):
                 st.session_state.data_warnings.append(f"Invalid total prob in ensemble for {position}: {total_prob}")
                 continue
+            valid_dists += 1
             for num, prob in dist.items():
                 if 1 <= num <= max_num and isinstance(prob, (int, float)) and prob >= 0:
                     ensemble_dist[num] += prob / total_prob
         total_ensemble_prob = sum(ensemble_dist.values()) or 1
         ensemble_dist = {num: prob / total_ensemble_prob for num, prob in ensemble_dist.items()}
         results['distributions'] = [ensemble_dist]
-        st.session_state.data_warnings.append(f"Ensemble for {position}: Top 5 probs={sorted(ensemble_dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
+        st.session_state.data_warnings.append(f"Ensemble for {position}: Top 5 probs={sorted(ensemble_dist.items(), key=lambda x: x[1], reverse=True)[:5]}, Valid dists={valid_dists}")
         return results
     except Exception as e:
         st.error(f"Error in stable position analysis for {position}: {e}")
-        return {'distributions': [{i: 1/float(max_num) for i in range(1, max_num + 1)}]}
+        return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)}]}
 
 # --- 5. ADVANCED PREDICTIVE MODELS ---
 @st.cache_resource
@@ -459,16 +473,16 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
         model, scaler, best_loss = _model_cache
         if model is None:
             st.warning(f"{model_type} training failed.")
-            return {'name': model_type, 'distributions': [{i: 1/float(max_num) for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
-        last_seq = scaler.transform(_df[-seq_length:].values).reshape(1, seq_length, 6)
-        last_seq_torch = torch.FloatTensor(last_seq).to(device)
+            return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
+        last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
+        last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
         with torch.no_grad():
             pred_scaled = model(last_seq_torch)
         prediction_raw = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
         prediction_raw = np.clip(prediction_raw, 1, max_nums)
         std_dev = max(1.0, np.sqrt(best_loss) * (max_nums[0] - 1) / 2)
         distributions = []
-        for i in range(6)):
+        for i in range(6):
             max_num = max_nums[i]
             x_range = np.arange(1, max_num + 1)
             prob_mass = stats.norm.pdf(x_range, loc=prediction_raw[i], scale=std_dev)
@@ -480,7 +494,7 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
         return {'name': model_type, 'distributions': distributions, 'logic': f'Deep learning {model_type} forecast.'}
     except Exception as e:
         st.warning(f"Prediction with {model_type} failed: {e}")
-        return {'name': model_type, 'distributions': [{i: 1/float(max_num) for max_num in max_nums], 'logic': f'{model_type} failed.'}
+        return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
 
 # --- 6. Backtesting & Meta-Analysis ---
 @st.cache_data
@@ -489,24 +503,24 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
     try:
         scored_predictions = []
         split_point = max(50, int(len(_df) * 0.8))
-        if len(_df) - split_point < 6:
-            st.warning("Insufficient validation data: {split_point} adjusted.")
-            split_point = len(_df) - 6
-        train_df, val_df = _df[:split_point], _df[split_point:]
+        if len(_df) - split_point < 10:
+            st.warning(f"Insufficient validation data: {len(_df) - split_point} rows. Adjusting split_point.")
+            split_point = len(_df) - 10
+        train_df, val_df = _df.iloc[:split_point], _df.iloc[split_point:]
         lstm_cache = train_torch_model(train_df, 'LSTM')
         gru_cache = train_torch_model(train_df, 'GRU')
         model_funcs = {
             'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 10, max_nums),
-            'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 3, max_nums),
+            'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 10, max_nums),
         }
         if stable_positions:
             for pos in stable_positions:
                 pos_idx = int(pos.split('_')[1]) - 1
                 if pos_idx < len(max_nums):
                     model_funcs[f'Stable_{pos}'] = lambda d, p=pos, m=max_nums[pos_idx]: analyze_stable_position_dynamics(d, p, m)
-        st.session_state.data_warnings.append(f"Initialized models: {list(model_funcs.keys())}} with max_nums={max_nums}")
+        st.session_state.data_warnings.append(f"Initialized models: {list(model_funcs.keys())} with max_nums={max_nums}")
         progress_bar = st.progress(0, text="Backtesting models...")
-        total_steps = len(val_df) * len(model_funcs.keys())
+        total_steps = len(val_df) * len(model_funcs)
         current_step = 0
         for name, func in model_funcs.items():
             total_log_loss, draw_count = 0, 0
@@ -514,63 +528,63 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                 try:
                     historical_df = _df.iloc[:split_point + i]
                     pred_obj = func(historical_df)
-                    if not pred_obj or not pred_obj.get('distributions', []) or len(pred_obj['distributions']) != 6 or not all(isinstance(d, dict) for d in pred_obj['distributions']):
+                    if not pred_obj or not pred_obj.get('distributions') or len(pred_obj['distributions']) != 6 or not all(isinstance(d, dict) for d in pred_obj['distributions']):
                         st.session_state.data_warnings.append(f"Invalid distributions for {name}, draw {i}: {pred_obj}")
                         continue
-                    y_true = val_df.iloc[i].values().tolist()
+                    y_true = val_df.iloc[i].values
                     draw_log_loss = 0
                     for pos_idx, dist in enumerate(pred_obj['distributions']):
                         if not dist:
                             st.session_state.data_warnings.append(f"Empty dist for Pos_{pos_idx+1} in {name}, draw {i}")
-                            dist = {j: 1/float(max_nums[pos_idx]) for j in range(1, max_nums[pos_idx] + 1)}
-                            total_prob = sum(dist.values())
+                            dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
+                        total_prob = sum(dist.values())
                         if total_prob == 0 or np.isnan(total_prob):
                             st.session_state.data_warnings.append(f"Invalid total prob for Pos_{pos_idx+1} in {name}: {total_prob}")
-                            dist = {j: float(max_nums[pos_idx]) for j in range(1, max_nums[pos_idx] + 1)})
-                            else:
-                                dist = {k: v/total_prob for k, v in dist.items()}
-                            true_num = int(y_true[pos_idx])
-                            if not (1 <= true_num <= max_nums[pos_idx]):
-                                st.session_state.data_warnings.append(f"Invalid true_num={true_num} for Pos_{pos_idx+1} in {name}, max_num={max_nums[pos_idx]}")
-                                continue
-                            prob_of_true = dist.get(true_num, 1e-10)
-                            st.session_state.data_warnings.append(f"{name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.5f}, Top 5={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
-                            draw_log_loss -= np.log(max(prob_of_true, float(1e-10)))
-                        draw_log_loss = min(draw_log_loss, 20.0)  # Cap to prevent overflow
-                        total_log_loss += draw_log_loss
-                        draw_count += 1
-                        st.session_state.data_warnings.append(f"{name}, Draw {i}: Log Loss={draw_log_loss:.3f}, Total={total_log_loss:.3f}, Draws={draw_count}")
-                    except Exception as e:
-                        st.session_state.data_warnings.append(f"Backtest error for {name}, draw {i}: {e}")
-                        continue
-                    current_step += 1
-                    progress_bar.progress(min(1.0, current_step / total_steps), text=f"Backtesting {name}...")
-                try:
-                    final_pred_obj = func(_df)
-                    if not final_pred_obj or not final_pred_obj.get('distributions') or len(final_pred_obj['distributions']) != 6:
-                        st.session_state.data_warnings.append(f"Final prediction failed for {name}: {final_pred_obj}")
-                        final_pred_obj = {
-                            'name': name,
-                            'distributions': [{i: 1/float(max_num)} for max_num in max_nums],
-                            'logic': f'{name} failed'
-                        }
-                    avg_log_loss = total_log_loss / draw_count if draw_count > 0 else 20
-                    likelihood = max(0, min(100, 100 - avg_log_loss * 10))  # Adjusted for stability
-                    final_pred_obj['likelihood'] = likelihood
-                    final_pred_obj['metrics'] = {'Avg Log Loss': f"{avg_log_loss:.3f}"}
-                    final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
-                    if len(final_pred_obj['prediction']) != 6:
-                        st.session_state.data_warnings.append(f"Invalid prediction set for {name}: {final_pred_obj['prediction']}")
-                        continue
-                    if final_pred_obj.get('name', 'Unknown Model') == 'Unknown Model':
-                        st.session_state.data_warnings.append(f"Skipping invalid model for {name}")
-                        continue
-                    scored_predictions.append(final_pred_obj)
-                    st.session_state.data_warnings.append(f"Final: {name}, Set={final_pred_obj['prediction']}, Likelihood={likelihood:.2f}%")
+                            dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
+                        else:
+                            dist = {k: v/total_prob for k, v in dist.items()}
+                        true_num = int(y_true[pos_idx])
+                        if not (1 <= true_num <= max_nums[pos_idx]):
+                            st.session_state.data_warnings.append(f"Invalid true_num={true_num} for Pos_{pos_idx+1} in {name}, max_num={max_nums[pos_idx]}")
+                            continue
+                        prob_of_true = dist.get(true_num, 1e-10)
+                        st.session_state.data_warnings.append(f"{name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.6f}, Top 5={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
+                        draw_log_loss -= np.log(max(prob_of_true, float(1e-10)))
+                    draw_log_loss = min(draw_log_loss, 20.0)  # Cap to prevent overflow
+                    total_log_loss += draw_log_loss
+                    draw_count += 1
+                    st.session_state.data_warnings.append(f"{name}, Draw {i}: Log Loss={draw_log_loss:.3f}, Total={total_log_loss:.3f}, Draws={draw_count}")
                 except Exception as e:
-                    st.session_state.data_warnings.append(f"Final prediction error for {name}: {e}")
-                progress_bar.empty()
-        st.session_state.data_warnings.append(f"Markov Chain calls: {sum([len(calls)] for calls in st.session_state.model_calls.values())}")
+                    st.session_state.data_warnings.append(f"Backtest error for {name}, draw {i}: {e}")
+                    continue
+                current_step += 1
+                progress_bar.progress(min(1.0, current_step / total_steps), text=f"Backtesting {name}...")
+            try:
+                final_pred_obj = func(_df)
+                if not final_pred_obj or not final_pred_obj.get('distributions') or len(final_pred_obj['distributions']) != 6:
+                    st.session_state.data_warnings.append(f"Final prediction failed for {name}: {final_pred_obj}")
+                    final_pred_obj = {
+                        'name': name,
+                        'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums],
+                        'logic': f'{name} failed'
+                    }
+                avg_log_loss = total_log_loss / draw_count if draw_count > 0 else 20
+                likelihood = max(0, min(100, 100 - avg_log_loss * 10))
+                final_pred_obj['likelihood'] = likelihood
+                final_pred_obj['metrics'] = {'Avg Log Loss': f"{avg_log_loss:.3f}"}
+                final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
+                if len(final_pred_obj['prediction']) != 6:
+                    st.session_state.data_warnings.append(f"Invalid prediction set for {name}: {final_pred_obj['prediction']}")
+                    continue
+                if final_pred_obj.get('name', 'Unknown Model') == 'Unknown Model':
+                    st.session_state.data_warnings.append(f"Skipping invalid model for {name}")
+                    continue
+                scored_predictions.append(final_pred_obj)
+                st.session_state.data_warnings.append(f"Final: {name}, Set={final_pred_obj['prediction']}, Likelihood={likelihood:.2f}%")
+            except Exception as e:
+                st.session_state.data_warnings.append(f"Final prediction error for {name}: {e}")
+            progress_bar.progress(1.0, text="Backtesting complete")
+        st.session_state.data_warnings.append(f"Markov Chain calls: {sum(len(calls) for calls in st.session_state.model_calls.values())}")
         if not scored_predictions:
             st.error("No valid predictions generated.")
             return []
@@ -579,22 +593,22 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         st.error(f"Backtest suite error: {e}")
         return []
 
-# =====================================================================================================
+# ====================================================================================================
 # Main Application UI & Logic
-# =====================================================================================================
-st.title("⚛️ LottoSphere v17.0.5: Quantum Chronodynamics Engine")
+# ====================================================================================================
+st.title("⚛️ LottoSphere v17.0.6: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis with probabilistic forecasting.")
 
 st.sidebar.header("Configuration")
-max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=100, value=50 + i*2, key=f'max_num_{i+1}') for i in range(6)]
+max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=100, value=50 + i*2, key=f"max_num_{i+1}") for i in range(6)]
 uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="CSV with one draw per row, numbers in columns. Last row is most recent.")
 
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
     for warning_msg in st.session_state.data_warnings:
         st.warning(warning_msg)
-    if not df_master.empty() and df_master.shape[1] == 6:
-        st.sidebar.success(f"Loaded and validated {len(df)} draws.")
+    if not df_master.empty and df_master.shape[1] == 6:
+        st.sidebar.success(f"Loaded and validated {len(df_master)} draws.")
         with st.spinner("Analyzing system stability..."):
             stable_positions = []
             for pos in df_master.columns:
@@ -627,7 +641,7 @@ if uploaded_file:
                 - Cross-validate with Dynamics Explorer.
                 """)
             
-            if st.button("🚗 Run All Models", type="primary", use_container_width=True):
+            if st.button("🚀 Run All Models", type="primary", use_container_width=True):
                 with st.spinner("Backtesting models... This may take a few minutes."):
                     scored_predictions = run_full_backtest_suite(df_master, max_nums, stable_positions)
                 st.header("✨ Final Predictions")
@@ -697,4 +711,3 @@ if uploaded_file:
                         st.warning("Lyapunov calculation failed.")
 else:
     st.info("Upload a CSV file to begin analysis.")
-
