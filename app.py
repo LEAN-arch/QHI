@@ -1,18 +1,16 @@
 # ======================================================================================================
-# LottoSphere v20.0.2: Synergetic Dynamics Engine (Hybrid BNN Fix)
+# LottoSphere v20.0.3: Synergetic Dynamics Engine (API Fix)
 #
-# VERSION: 20.0.2
+# VERSION: 20.0.3
 #
 # DESCRIPTION:
 # This version provides a critical bugfix for the BayesianSequenceModel. The previous version
-# incorrectly called a non-existent `bnn.BayesLSTM`. This has been replaced with a correct
-# hybrid architecture using a standard `nn.LSTM` for feature extraction and a `bnn.BayesLinear`
-# head for probabilistic prediction and uncertainty quantification.
+# called the `bnn.BayesLinear` constructor with positional arguments, causing a TypeError.
+# This has been fixed by using the required keyword arguments (`in_features`, `out_features`).
 #
-# CHANGELOG (v20.0.2):
-# - CRITICAL BUGFIX: Replaced call to non-existent `bnn.BayesLSTM` in `BayesianSequenceModel`.
-# - NEW ARCHITECTURE: Implemented a hybrid `nn.LSTM` + `bnn.BayesLinear` model which correctly
-#   leverages the `torchbnn` library for recurrent sequence modeling.
+# CHANGELOG (v20.0.3):
+# - CRITICAL BUGFIX: Corrected the `bnn.BayesLinear` initialization to use keyword arguments
+#   (in_features=..., out_features=...), resolving the TypeError.
 # - STABILITY: The application will now run correctly without the AttributeError.
 # ======================================================================================================
 
@@ -36,7 +34,7 @@ import math
 
 # --- Page Configuration and Optional Dependencies ---
 st.set_page_config(
-    page_title="LottoSphere v20.0.2: Synergetic Dynamics",
+    page_title="LottoSphere v20.0.3: Synergetic Dynamics",
     page_icon="🕸️",
     layout="wide",
 )
@@ -166,32 +164,26 @@ class BayesianSequenceModel(BaseModel):
         X, y = create_sequences(data_scaled, self.seq_length)
         if len(X) == 0: return
 
-        # --- BUGFIX: Define a proper hybrid model ---
         class _HybridBayesianLSTM(nn.Module):
             def __init__(self, input_size=6, hidden_size=50, output_size=6):
                 super().__init__()
-                # Standard LSTM for processing sequences
                 self.lstm = nn.LSTM(input_size, hidden_size, num_layers=2, batch_first=True, dropout=0.2)
-                # Bayesian Linear layer for the final output
-                self.bayes_fc = bnn.BayesLinear(hidden_size, output_size)
+                # --- BUGFIX: Use keyword arguments for BayesLinear ---
+                self.bayes_fc = bnn.BayesLinear(in_features=hidden_size, out_features=output_size)
+                # --- End of Bugfix ---
 
             def forward(self, x):
-                # lstm_out shape: (batch_size, seq_length, hidden_size)
                 lstm_out, _ = self.lstm(x)
-                # We only need the output of the last time step
                 last_hidden_state = lstm_out[:, -1, :]
-                # Pass the last hidden state to the Bayesian layer
                 return self.bayes_fc(last_hidden_state)
 
         self.model = _HybridBayesianLSTM().to(device)
-        # --- End of Bugfix ---
-
+        
         X_torch, y_torch = torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
         dataset = TensorDataset(X_torch, y_torch)
         dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
         
         criterion = nn.MSELoss()
-        # The ELBO loss function correctly finds the Bayesian layers in the model
         kl_loss = bnn.PyTorchBNN.ELBO(dataset=dataset, criterion=criterion, kl_weight=0.1)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.005)
         
@@ -211,7 +203,6 @@ class BayesianSequenceModel(BaseModel):
         input_tensor = torch.tensor(last_seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
         
         with torch.no_grad():
-            # Sample multiple times to get a distribution of predictions
             predictions_raw = np.array([self.scaler.inverse_transform(self.model(input_tensor).cpu().numpy()).flatten() for _ in range(n_samples)])
         
         mean_pred = np.mean(predictions_raw, axis=0)
@@ -332,7 +323,7 @@ class GraphCommunityModel(BaseModel):
 def run_backtest(model_instance: BaseModel, df: pd.DataFrame, train_size: int, backtest_steps: int, **kwargs) -> Dict[str, Any]:
     log_losses, uncertainties = [], []
     for i in range(backtest_steps):
-        if train_size + i >= len(df): break # Prevent index out of bounds
+        if train_size + i >= len(df): break
         current_train_df = df.iloc[:train_size + i]
         true_draw = df.iloc[train_size + i].values
         model_instance.train(current_train_df, **kwargs)
@@ -351,7 +342,7 @@ def run_backtest(model_instance: BaseModel, df: pd.DataFrame, train_size: int, b
         metrics['Uncertainty'] = np.mean(uncertainties)
     return metrics
 
-# --- 5. STABILITY & DYNAMICS ANALYSIS FUNCTIONS (Unchanged from v20.0.1) ---
+# --- 5. STABILITY & DYNAMICS ANALYSIS FUNCTIONS (Unchanged) ---
 @st.cache_data
 def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_steps: int) -> go.Figure:
     if not AutoARIMA:
