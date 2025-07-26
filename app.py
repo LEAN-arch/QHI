@@ -849,7 +849,7 @@ if uploaded_file:
             st.sidebar.header("3. Clustering Settings")
             cluster_min_size = st.sidebar.slider("Minimum Cluster Size", 5, 50, 10, 1)
             cluster_min_samples = st.sidebar.slider("Minimum Samples", 1, 20, 3, 1)
-            cluster_result = clustering_analysis(df.iloc[-training_size:min_size], cluster_min_samples)
+            cluster_result = analyze_clusters(df.iloc[:, :5], cluster_min_size, cluster_min_samples)
             col1, col2 = st.columns([3, 1])
             col1.plotly_chart(cluster_result['fig'], use_container_width=True)
             with col2:
