@@ -747,91 +747,91 @@ if uploaded_file:
                             except Exception as e:
                                 st.error(f"Failed to generate forecast for {name}: {e}")
                                 st.session_state.data_warnings.append(f"{name}: Forecast error: {e}")
-        with tab2:
-            st.header("🕸️ Graph Dynamics (Positions 1-5)")
-            if not nx:
-                st.error("Graph Dynamics disabled: networkx not installed.")
-            else:
-                st.markdown("""
-                **What am I looking at?**  
-                This graph represents the "social network" of the first five numbers. Each number is a node. An edge connects two numbers if they have appeared together in the same draw. The thicker the edge, the more frequently they have co-occurred. Colors represent distinct **communities**—groups of numbers that are more connected to each other than to the rest of the network.
+with tab2:
+    st.header("🕸️ Graph Dynamics (Positions 1-5)")
+    if not nx:
+        st.error("Graph Dynamics disabled: networkx not installed.")
+    else:
+        st.markdown("""
+        **What am I looking at?**  
+        This graph represents the "social network" of the first five numbers. Each number is a node. An edge connects two numbers if they have appeared together in the same draw. The thicker the edge, the more frequently they have co-occurred. Colors represent distinct **communities**—groups of numbers that are more connected to each other than to the rest of the network.
 
-                **What is the significance?**  
-                - **Dense Communities:** Stable, predictable regimes. Predictions within a strong community are high-confidence.
-                - **Central Nodes (Hubs):** Influential numbers with many connections.
-                - **Sparse Graph:** Indicates chaotic or transitioning regimes, reducing prediction reliability.
+        **What is the significance?**  
+        - **Dense Communities:** Stable, predictable regimes. Predictions within a strong community are high-confidence.
+        - **Central Nodes (Hubs):** Influential numbers with many connections.
+        - **Sparse Graph:** Indicates chaotic or transitioning regimes, reducing prediction reliability.
 
-                **How do I use this result?**  
-                - Check if communities are stable over time using the "Lookback" slider.
-                - Cross-reference predictions with large, dense communities.
-                - Consider hubs for conservative predictions.
-                """)
-                st.sidebar.header("2. Graph Controls")
-                graph_lookback = st.sidebar.slider("Lookback for Graph (Draws)", 20, 500, 100, 5)
-                community_resolution = st.slider("Community Resolution", 0.5, 2.5, 1.2, 0.1, help="Higher values → more, smaller communities.")
-                graph_df = df.iloc[-graph_lookback:,:5]
-                if graph_df.empty():
-                    st.warning("No data available for graph analysis.")
-                else:
-                    G = nx.Graph()
-                    for _, row in graph_df.iterrows():
-                        for u, v in itertools.combinations(row.values, 2):
-                            if G.has_edge(u, v):
-                                G[u][v]['weight'] += 1
-                            else:
-                                G.add_edge(u, v, weight=1')
-                    if len(G.edges()) < 5:
-                        st.session_state.data_warnings.append(f"Graph has too few edges ({len(G.edges())}). Sparse data.")
-                        st.warning("Sparse data: insufficient co-occurrences for meaningful graph.")
+        **How do I use this result?**  
+        - Check if communities are stable over time using the "Lookback" slider.
+        - Cross-reference predictions with large, dense communities.
+        - Consider hubs for conservative predictions.
+        """)
+        st.sidebar.header("2. Graph Controls")
+        graph_lookback = st.sidebar.slider("Lookback for Graph (Draws)", 20, 500, 100, 5)
+        community_resolution = st.slider("Community Resolution", 0.5, 2.5, 1.2, 0.1, help="Higher values → more, smaller communities.")
+        graph_df = df.iloc[-graph_lookback:,:5]
+        if graph_df.empty:
+            st.warning("No data available for graph analysis.")
+        else:
+            G = nx.Graph()
+            for _, row in graph_df.iterrows():
+                for u, v in itertools.combinations(row.values, 2):
+                    if G.has_edge(u, v):
+                        G[u][v]['weight'] += 1
                     else:
-                        try:
-                            communities = list(nx_comm.louvain_communities(G, weight='weight', resolution=community_resolution, seed=42))
-                            col1, col2 = st.columns([3, 5])
-                            with col1:
-                                st.subheader("Discovered Communities")
-                                st.markdown("Numbers that tend to appear together in positions 1-5.")
-                                for i, comm in enumerate(communities):
-                                    if len(comm) > 2:
-                                        st.markdown(f"**C{i}**: `{sorted(list(comm))}`")
-                            with col2:
-                                pos = nx.spring_layout(G, k=0.8, iterations=50, seed=42)
-                                edge_x, edge_y = [], []
-                                edge_weights = []
-                                for edge in G.edges():
-                                    x0, y0 = pos[edge[0]]; x1, y1 = pos[edge[1]]
-                                    edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
-                                    edge_weights.append(G[edge[0]][edge[1]]['weight'])
-                                edge_trace = go.Scatter(
-                                    x=edge_x, y=edge_y, line=dict(width=np.array(edge_weights)/np.max(edge_weights)*5, color='#888'),
-                                    hoverinfo='none', mode='lines'
-                                )
-                                node_x, node_y, node_text, node_color, node_size = [], [], [], [], []
-                                centrality = nx.degree_centrality(G)
-                                color_map = px.colors.qualitative.Vivid
-                                community_map = {node: i for i, comm in enumerate(communities) for node in comm}
-                                for node in G.nodes():
-                                    x, y = pos[node]
-                                    node_x.append(x); node_y.append(y)
-                                    node_color.append(color_map[community_map.get(node, -1) % len(color_map)])
-                                    node_size.append(15 + 40 * centrality.get(node, 0))
-                                    node_text.append(f"Num: {node}<br>Community: {community_map.get(node, 'N/A')}<br>Centrality: {centrality.get(node, 0):.2f}")
-                                node_trace = go.Scatter(
-                                    x=node_x, y=node_y, mode='markers', hoverinfo='text', hovertext=node_text,
-                                    marker=dict(color=node_color, size=node_size, line_width=1)
-                                )
-                                fig = go.Figure(
-                                    data=[edge_trace, node_trace],
-                                    layout=go.Layout(
-                                        title='Co-occurrence Network of Numbers (Pos 1-5)', showlegend=False,
-                                        hovermode='closest', margin=dict(l=5, r=25, t=40, b=5),
-                                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-                                    )
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                        except Exception as e:
-                            st.error(f"Graph generation failed: {e}")
-                            st.session_state.data_warnings.append(f"Graph error: {e}")
+                        G.add_edge(u, v, weight=1)  # Fixed line
+            if len(G.edges()) < 5:
+                st.session_state.data_warnings.append(f"Graph has too few edges ({len(G.edges())}). Sparse data.")
+                st.warning("Sparse data: insufficient co-occurrences for meaningful graph.")
+            else:
+                try:
+                    communities = list(nx_comm.louvain_communities(G, weight='weight', resolution=community_resolution, seed=42))
+                    col1, col2 = st.columns([3, 5])
+                    with col1:
+                        st.subheader("Discovered Communities")
+                        st.markdown("Numbers that tend to appear together in positions 1-5.")
+                        for i, comm in enumerate(communities):
+                            if len(comm) > 2:
+                                st.markdown(f"**C{i}**: `{sorted(list(comm))}`")
+                    with col2:
+                        pos = nx.spring_layout(G, k=0.8, iterations=50, seed=42)
+                        edge_x, edge_y = [], []
+                        edge_weights = []
+                        for edge in G.edges():
+                            x0, y0 = pos[edge[0]]; x1, y1 = pos[edge[1]]
+                            edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
+                            edge_weights.append(G[edge[0]][edge[1]]['weight'])
+                        edge_trace = go.Scatter(
+                            x=edge_x, y=edge_y, line=dict(width=np.array(edge_weights)/np.max(edge_weights)*5, color='#888'),
+                            hoverinfo='none', mode='lines'
+                        )
+                        node_x, node_y, node_text, node_color, node_size = [], [], [], [], []
+                        centrality = nx.degree_centrality(G)
+                        color_map = px.colors.qualitative.Vivid
+                        community_map = {node: i for i, comm in enumerate(communities) for node in comm}
+                        for node in G.nodes():
+                            x, y = pos[node]
+                            node_x.append(x); node_y.append(y)
+                            node_color.append(color_map[community_map.get(node, -1) % len(color_map)])
+                            node_size.append(15 + 40 * centrality.get(node, 0))
+                            node_text.append(f"Num: {node}<br>Community: {community_map.get(node, 'N/A')}<br>Centrality: {centrality.get(node, 0):.2f}")
+                        node_trace = go.Scatter(
+                            x=node_x, y=node_y, mode='markers', hoverinfo='text', hovertext=node_text,
+                            marker=dict(color=node_color, size=node_size, line_width=1)
+                        )
+                        fig = go.Figure(
+                            data=[edge_trace, node_trace],
+                            layout=go.Layout(
+                                title='Co-occurrence Network of Numbers (Pos 1-5)', showlegend=False,
+                                hovermode='closest', margin=dict(l=5, r=25, t=40, b=5),
+                                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                            )
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Graph generation failed: {e}")
+                    st.session_state.data_warnings.append(f"Graph error: {e}")
         with tab3:
             st.header("📉 System Stability & Dynamics")
             st.subheader("Training Window Stabilization Analysis")
