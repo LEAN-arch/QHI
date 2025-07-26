@@ -3,7 +3,7 @@
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-25
-# VERSION: 16.0.6 (Enhanced with Advanced Stable Position Analysis)
+# VERSION: 16.0.6 (Enhanced with Advanced Stable Position Analysis, Wavelet Replaced with Spectrogram)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -13,14 +13,13 @@
 # metrology suite. Enhanced with periodicity analysis, position-specific maximum numbers, and
 # new analyses for stable positions (non-positive Lyapunov exponents) using Statistical Physics,
 # Time Series Analysis, Machine Learning, Dynamical Systems, Information Theory, and Cognitive
-# Computing.
+# Computing. Wavelet transform replaced with spectrogram due to PyWavelets installation issues.
 #
 # CHANGELOG:
 # - Ensured predictions per position respect user-specified maximum numbers (max_nums).
 # - Explicitly handled CSV data as temporal, with most recent draws as the last rows.
-# - Added advanced analyses for stable positions (non-positive Lyapunov exponents) with tools
-#   from Statistical Physics, Time Series Analysis, Machine Learning, Dynamical Systems,
-#   Information Theory, and Cognitive Computing.
+# - Added advanced analyses for stable positions (non-positive Lyapunov exponents).
+# - Replaced pywt.cwt with scipy.signal.spectrogram for time-frequency analysis.
 # ======================================================================================================
 
 import streamlit as st
@@ -45,8 +44,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 import umap
 import hdbscan
-import pywt
-from scipy.signal import welch
+from scipy.signal import welch, spectrogram
 from nolds import lyap_r
 from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
@@ -173,19 +171,18 @@ def analyze_temporal_behavior(_df, position='Pos_1'):
             title=f"Power Spectral Density ({position})"
         )
         
-        # Wavelet Transform
-        widths = np.arange(1, min(31, len(series)//2))
-        cwt_matrix, _ = pywt.cwt(series, widths, 'morl')
-        results['wavelet_fig'] = go.Figure(data=go.Heatmap(
-            z=np.abs(cwt_matrix),
-            x=np.arange(len(series)),
-            y=widths,
+        # Spectrogram (Replaces Wavelet Transform)
+        f, t, Sxx = spectrogram(series, fs=1.0, nperseg=min(256, len(series)), noverlap=int(min(256, len(series))*0.9))
+        results['spectrogram_fig'] = go.Figure(data=go.Heatmap(
+            z=10 * np.log10(Sxx + 1e-10),
+            x=t,
+            y=f,
             colorscale='viridis'
         ))
-        results['wavelet_fig'].update_layout(
-            title=f'Continuous Wavelet Transform ({position})',
+        results['spectrogram_fig'].update_layout(
+            title=f'Spectrogram ({position})',
             xaxis_title='Time',
-            yaxis_title='Scale'
+            yaxis_title='Frequency'
         )
         
         # Lyapunov Exponent
@@ -794,6 +791,7 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6, stable_p
     except Exception as e:
         st.error(f"Error in predictive maturity analysis: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
 # ====================================================================================================
 # Main Application UI & Logic
 # ====================================================================================================
@@ -946,7 +944,7 @@ if uploaded_file:
                 ### Outputs for All Positions
                 - **Recurrence Plot**: Visualizes state recurrences, revealing periodic or chaotic patterns.
                 - **Power Spectral Density (Fourier)**: Identifies dominant cycles (e.g., 10 draws).
-                - **Continuous Wavelet Transform**: Maps time-varying periodic patterns.
+                - **Spectrogram**: Maps time-varying frequency content, replacing wavelet transform due to library constraints.
                 - **Lyapunov Exponent**: Quantifies chaos (positive) or stability (non-positive).
                 - **Periodicity Analysis (Stable Positions)**: Detects cycles via autocorrelation.
 
@@ -1003,7 +1001,7 @@ if uploaded_file:
                         st.plotly_chart(dynamic_results['recurrence_fig'], use_container_width=True)
                     with col2:
                         st.plotly_chart(dynamic_results['fourier_fig'], use_container_width=True)
-                    st.plotly_chart(dynamic_results['wavelet_fig'], use_container_width=True)
+                    st.plotly_chart(dynamic_results['spectrogram_fig'], use_container_width=True)
                     if dynamic_results['lyapunov'] > 0:
                         st.warning(
                             f"**Lyapunov Exponent:** `{dynamic_results['lyapunov']:.4f}`. A positive value suggests the system is chaotic and highly sensitive to initial conditions.",
