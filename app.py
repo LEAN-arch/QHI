@@ -1,20 +1,18 @@
 # ======================================================================================================
-# LottoSphere v16.0.14: The Quantum Chronodynamics Engine (Final Stable)
+# LottoSphere v16.0.15: The Quantum Chronodynamics Engine (Final)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.14 (Final Stable)
+# VERSION: 16.0.15 (Final)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
 # data, framed around lottery number sets. This version is stabilized by removing the problematic
 # Bayesian Neural Network model to resolve deep dependency conflicts.
 #
-# CHANGELOG (from v16.0.13 to v16.0.14):
-# - REMOVED: The Bayesian Neural Network (BNN) model and its dependencies (tensorflow, 
-#   tensorflow-probability) have been completely removed to resolve a critical Keras version conflict.
-# - FIXED: Corrected the AttributeError for the AutoARIMA prediction by using the correct
-#   NumPy indexer `[0]` instead of the incorrect Pandas indexer `.iloc[0]`.
+# CHANGELOG (from v16.0.14 to v16.0.15):
+# - FIXED: Corrected an AttributeError in the HMM model by updating the emission probability
+#   attribute from the deprecated 'emissionprob_' to the correct 'emission_prob_'.
 # ======================================================================================================
 
 import streamlit as st
@@ -53,7 +51,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.14: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.15: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -243,7 +241,8 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     hmm.fit(hmm_series)
     last_state = hmm.predict(hmm_series)[-1]
     next_state = np.argmax(hmm.transmat_[last_state])
-    hmm_pred = np.argmax(hmm.emissionprob_[next_state]) + 1
+    # FIXED: Use the correct attribute name 'emission_prob_'
+    hmm_pred = np.argmax(hmm.emission_prob_[next_state]) + 1
     results['hmm_pred'] = int(np.clip(hmm_pred, 1, max_num))
     return results
 
@@ -262,7 +261,6 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
 
         sarima_model = AutoARIMA(sp=1, suppress_warnings=True)
         sarima_model.fit(series)
-        # FIXED: Use [0] for numpy array instead of .iloc[0] for pandas series
         prediction_result = sarima_model.predict(fh=[1])
         sarima_pred = int(np.clip(np.round(prediction_result[0]), 1, max_num))
         results['sarima_pred'] = sarima_pred
@@ -273,7 +271,6 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         hist, _ = np.histogram(series, bins=max_num, range=(1, max_num+1), density=True)
         results['shannon_entropy'] = -np.sum(hist * np.log2(hist + 1e-12))
 
-        # REMOVED: BNN prediction from ensemble
         preds = [results['mcmc_pred'], results['sarima_pred'], results['hmm_pred']]
         fuzzy_pred = int(np.clip(np.round(np.mean(preds)), 1, max_num))
         results['fuzzy_pred'] = fuzzy_pred
@@ -504,7 +501,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.14: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.15: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 st.sidebar.header("Configuration")
@@ -609,7 +606,6 @@ if uploaded_file:
                         stable_results = analyze_stable_position_dynamics(df_master, position, max_nums[df_master.columns.get_loc(position)])
                     
                     if stable_results:
-                        # Removed BNN metric display
                         pred_col1, pred_col2, pred_col3 = st.columns(3)
                         pred_col1.metric("MCMC Prediction", stable_results.get('mcmc_pred', 'N/A'))
                         pred_col2.metric("HMM Prediction", stable_results.get('hmm_pred', 'N/A'))
