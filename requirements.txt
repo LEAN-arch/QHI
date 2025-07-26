@@ -2,29 +2,24 @@
 # Compatible with Python 3.11
 # Install with: pip install -r requirements.txt
 
-streamlit==1.35.0
-pandas==2.2.2
-numpy==1.26.4
-plotly==5.24.0
-matplotlib==3.9.2
-scikit-learn==1.5.2
-umap-learn==0.5.6
-hdbscan==0.8.33
-pywt==1.4.1
-pywavelets==1.7.0
-scipy==1.14.1
-nolds==0.5.2
-torch==2.3.2
-statsmodels==0.14.2
-tensorflow==2.16.1
-tensorflow-probability==0.24.0
-PyEMD==1.0.0
-prophet==1.1.5
-hmmlearn==0.3.2
-networkx==3.3
-sktime==0.30.1
-# Notes:
-# - For GPU support, install PyTorch with CUDA manually, e.g.:
-#   pip install torch==2.2.2+cu118 -f https://download.pytorch.org/whl/torch_stable.html
-#   (Adjust CUDA version based on your system: cu118 for CUDA 11.8, cu121 for CUDA 12.1, etc.)
-# - Ensure Python 3.11 is used for compatibility.
+streamlit==1.35.0 
+pandas==2.2.2 
+numpy==1.26.4 
+plotly==5.22.0 
+matplotlib==3.8.4 
+scikit-learn==1.5.0 
+umap-learn==0.5.6 
+hdbscan==0.8.33 
+pywt==1.5.0 
+scipy==1.13.1 
+nolds==0.5.2 
+statsmodels==0.14.2 
+torch==2.3.0 
+tensorflow==2.16.1 
+tensorflow-probability==0.24.0 
+PyEMD==1.0.0 
+prophet==1.1.5 
+hmmlearn==0.3.2 
+networkx==3.3 
+sktime==0.30.1 
+rich==13.7.1
