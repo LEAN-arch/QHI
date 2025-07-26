@@ -17,7 +17,8 @@
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
 # - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
 # - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models by defining it outside try block.
-# - Added compatibility check for hmmlearn version and fallback for MultinomialHMM changes.
+# - Replaced MultinomialHMM with Markov Chain model in _analyze_ml_models due to hmmlearn incompatibility.
+# - Removed hmmlearn dependency from requirements.txt.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -33,7 +34,6 @@ import warnings
 from typing import List, Dict, Any, Tuple, Optional
 import scipy.stats as stats
 import os
-import pkg_resources
 
 # --- Suppress Warnings for a Cleaner UI ---
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -46,17 +46,12 @@ from scipy.signal import welch, spectrogram
 from nolds import lyap_r
 from statsmodels.tsa.stattools import acf
 from prophet import Prophet
-from hmmlearn.hmm import MultinomialHMM
 from sktime.forecasting.arima import AutoARIMA
 
 # --- Deep Learning (PyTorch) ---
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-
-# --- Check hmmlearn Version ---
-hmmlearn_version = pkg_resources.get_distribution("hmmlearn").version
-st.session_state.data_warnings.append(f"Using hmmlearn version {hmmlearn_version}. Expected 0.3.2 for compatibility.")
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
@@ -261,43 +256,36 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
 def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
-    hmm_series = (series - 1).reshape(-1, 1)
+    series = series - 1  # Adjust to 0-based indexing
     call_id = f"{position}_{len(st.session_state.hmm_calls.get(position, {})) + 1}"
     st.session_state.hmm_calls.setdefault(position, {})[call_id] = st.session_state.hmm_calls.get(position, {}).get(call_id, 0) + 1
     try:
         # Validate input series
-        if not np.all((hmm_series >= 0) & (hmm_series < max_num)):
+        if not np.all((series >= 0) & (series < max_num)):
             raise ValueError(f"Invalid values in series for {position}: must be in range [0, {max_num-1}]")
-        if hmmlearn_version > '0.3.0':
-            st.warning(f"Detected hmmlearn {hmmlearn_version}. Using fallback for MultinomialHMM compatibility.")
-            # Fallback for newer MultinomialHMM (requires n_trials)
-            hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3)
-            # Simulate single-trial data
-            n_trials = np.ones((len(hmm_series), 1), dtype=int)
-            hmm.fit(hmm_series, n_trials=n_trials)
-            last_state = hmm.predict(hmm_series, n_trials=n_trials)[-1]
-            next_state = np.argmax(hmm.transmat_[last_state])
-            emission_probs = getattr(hmm, 'emissionprobs_', None)
-            if emission_probs is None:
-                st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
-                results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
-            else:
-                results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
-        else:
-            # Original code for hmmlearn==0.3.2
-            hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
-            hmm.fit(hmm_series)
-            last_state = hmm.predict(hmm_series)[-1]
-            next_state = np.argmax(hmm.transmat_[last_state])
-            emission_probs = getattr(hmm, 'emissionprobs_', None)
-            if emission_probs is None:
-                st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
-                results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
-            else:
-                results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
+        
+        # Markov Chain model
+        trans_matrix = np.zeros((max_num, max_num))
+        for i in range(len(series) - 1):
+            from_state, to_state = int(series[i]), int(series[i + 1])
+            trans_matrix[from_state, to_state] += 1
+        # Add small constant for smoothing
+        trans_matrix += 1e-10
+        # Normalize to probabilities
+        trans_matrix /= trans_matrix.sum(axis=1, keepdims=True)
+        # Handle any rows with all zeros
+        trans_matrix[np.isnan(trans_matrix)] = 1 / max_num
+        # Predict next state from last observed state
+        last_state = int(series[-1]) if 0 <= int(series[-1]) < max_num else 0
+        prob_dist = trans_matrix[last_state]
+        results['markov_dist'] = {i + 1: float(p) for i, p in enumerate(prob_dist) if 1 <= i + 1 <= max_num}
+        
     except Exception as e:
-        st.warning(f"HMM model failed for {position} (call {call_id}): {e}")
-        results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+        st.warning(f"Markov Chain model failed for {position} (call {call_id}): {e}")
+        results['markov_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+    
+    # Rename to hmm_dist for compatibility with ensemble
+    results['hmm_dist'] = results.pop('markov_dist', {i: 1/max_num for i in range(1, max_num + 1)})
     return results
 
 @st.cache_data
@@ -448,7 +436,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
             scored_predictions.append(final_pred_obj)
         progress_bar.empty()
-        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {sum([sum(calls.values()) for calls in st.session_state.hmm_calls.values()])}")
+        st.session_state.data_warnings.append(f"Total Markov Chain calls during backtest: {sum([sum(calls.values()) for calls in st.session_state.hmm_calls.values()])}")
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
     except Exception as e:
         st.error(f"Error in backtesting suite: {e}")
@@ -487,11 +475,11 @@ if uploaded_file:
             with st.expander("Explanation of Probabilistic Forecasts"):
                 st.markdown("""
                 ### Overview
-                The Probabilistic Forecasting tab generates probability distributions for the next lottery draw using LSTM, GRU, and stable position models (MCMC, SARIMA, HMM). Predictions are ranked by historical performance (log loss) on a validation set.
+                The Probabilistic Forecasting tab generates probability distributions for the next lottery draw using LSTM, GRU, and stable position models (MCMC, SARIMA, Markov Chain). Predictions are ranked by historical performance (log loss) on a validation set.
 
                 ### Models
                 - **LSTM/GRU**: Deep learning models capturing sequential patterns.
-                - **Stable Position Models**: For stable positions (Lyapunov exponent ≤ 0.05), combine MCMC (Markov Chain Monte Carlo), SARIMA (time-series forecasting), and HMM (Hidden Markov Model).
+                - **Stable Position Models**: For stable positions (Lyapunov exponent ≤ 0.05), combine MCMC (Markov Chain Monte Carlo), SARIMA (time-series forecasting), and Markov Chain (transition probability model).
                 - **Backtesting**: Uses walk-forward validation to compute average log loss, converted to a likelihood score (100 - 15 × log loss).
 
                 ### Actionability
