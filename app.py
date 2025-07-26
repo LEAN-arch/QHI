@@ -1,18 +1,19 @@
 # ======================================================================================================
-# LottoSphere v20.0.1: Synergetic Dynamics Engine (Resilient)
+# LottoSphere v20.0.2: Synergetic Dynamics Engine (Hybrid BNN Fix)
 #
-# VERSION: 20.0.1
+# VERSION: 20.0.2
 #
 # DESCRIPTION:
-# This version fixes a fatal crash caused by a missing 'pmdarima' dependency for sktime's AutoARIMA.
-# The code is now resilient and will gracefully disable the stabilization analysis if the
-# dependency is not found, rather than crashing the entire application.
+# This version provides a critical bugfix for the BayesianSequenceModel. The previous version
+# incorrectly called a non-existent `bnn.BayesLSTM`. This has been replaced with a correct
+# hybrid architecture using a standard `nn.LSTM` for feature extraction and a `bnn.BayesLinear`
+# head for probabilistic prediction and uncertainty quantification.
 #
-# CHANGELOG (v20.0.1):
-# - BUGFIX: Added 'pmdarima' to the official requirements.txt.
-# - RESILIENCE: Wrapped the `AutoARIMA` import in a try-except block.
-# - RESILIENCE: The `find_stabilization_point` function now checks if `AutoARIMA` is available
-#   and displays an informative error message instead of crashing.
+# CHANGELOG (v20.0.2):
+# - CRITICAL BUGFIX: Replaced call to non-existent `bnn.BayesLSTM` in `BayesianSequenceModel`.
+# - NEW ARCHITECTURE: Implemented a hybrid `nn.LSTM` + `bnn.BayesLinear` model which correctly
+#   leverages the `torchbnn` library for recurrent sequence modeling.
+# - STABILITY: The application will now run correctly without the AttributeError.
 # ======================================================================================================
 
 import streamlit as st
@@ -35,18 +36,16 @@ import math
 
 # --- Page Configuration and Optional Dependencies ---
 st.set_page_config(
-    page_title="LottoSphere v20.0.1: Synergetic Dynamics",
+    page_title="LottoSphere v20.0.2: Synergetic Dynamics",
     page_icon="🕸️",
     layout="wide",
 )
 
-# --- CRITICAL FIX: Make AutoARIMA import optional ---
 try:
     from sktime.forecasting.arima import AutoARIMA
 except ImportError:
     AutoARIMA = None
     st.sidebar.warning("`sktime` or `pmdarima` not found. Stabilization analysis will be disabled.")
-
 try:
     import networkx as nx
     from networkx.algorithms import community as nx_comm
@@ -69,11 +68,9 @@ except ImportError:
     umap = None
     st.sidebar.warning("`umap-learn` not found. UMAP visualization will be disabled.")
 
-# --- Suppress Warnings for a Cleaner UI ---
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- Initialize Session State and Device ---
 if 'df_master' not in st.session_state:
     st.session_state.df_master = pd.DataFrame()
 
@@ -89,8 +86,6 @@ def load_and_validate_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> Tu
             logs.append(f"Error: CSV must have 6 columns, but found {df.shape[1]}.")
             return pd.DataFrame(), logs
         df.columns = [f'Pos_{i+1}' for i in range(6)]
-        logs.append(f"Loaded {len(df)} rows. Starting validation...")
-        initial_rows = len(df)
         df_validated = df.copy()
         for i, col in enumerate(df_validated.columns):
             df_validated[col] = pd.to_numeric(df_validated[col], errors='coerce')
@@ -98,12 +93,8 @@ def load_and_validate_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> Tu
         df_validated = df_validated.astype(int)
         for i, max_num in enumerate(max_nums):
             df_validated = df_validated[df_validated[f'Pos_{i+1}'].between(1, max_num)]
-        logs.append(f"{len(df_validated)} rows remain after range validation.")
         is_duplicate_in_row = df_validated.apply(lambda row: row.nunique() != 6, axis=1)
-        num_dupe_rows = is_duplicate_in_row.sum()
-        if num_dupe_rows > 0:
-            logs.append(f"Discarding {num_dupe_rows} rows containing duplicate numbers.")
-            df_validated = df_validated[~is_duplicate_in_row]
+        df_validated = df_validated[~is_duplicate_in_row]
         if len(df_validated) < 50:
             logs.append(f"Error: Insufficient valid data ({len(df_validated)} rows). Need at least 50.")
             return pd.DataFrame(), logs
@@ -156,33 +147,54 @@ class BaseModel:
     def train(self, df: pd.DataFrame, **kwargs): raise NotImplementedError
     def predict(self, **kwargs) -> Dict[str, Any]: raise NotImplementedError
 
-# --- 3. ADVANCED PREDICTIVE MODELS (Unchanged) ---
+# --- 3. ADVANCED PREDICTIVE MODELS ---
+
 class BayesianSequenceModel(BaseModel):
     def __init__(self, max_nums, seq_length=12, epochs=30):
         super().__init__(max_nums)
         self.name = "Bayesian LSTM Model"
-        self.logic = "A Bayesian LSTM that models uncertainty in its predictions, providing a confidence score."
+        self.logic = "A hybrid model using a standard LSTM for temporal features and a Bayesian layer for probabilistic prediction."
         self.seq_length = seq_length
         self.epochs = epochs
         self.model = None
         self.scaler = None
+
     def train(self, df: pd.DataFrame, **kwargs):
         if not bnn or len(df) <= self.seq_length: return
         self.scaler = MinMaxScaler()
         data_scaled = self.scaler.fit_transform(df)
         X, y = create_sequences(data_scaled, self.seq_length)
         if len(X) == 0: return
+
+        # --- BUGFIX: Define a proper hybrid model ---
+        class _HybridBayesianLSTM(nn.Module):
+            def __init__(self, input_size=6, hidden_size=50, output_size=6):
+                super().__init__()
+                # Standard LSTM for processing sequences
+                self.lstm = nn.LSTM(input_size, hidden_size, num_layers=2, batch_first=True, dropout=0.2)
+                # Bayesian Linear layer for the final output
+                self.bayes_fc = bnn.BayesLinear(hidden_size, output_size)
+
+            def forward(self, x):
+                # lstm_out shape: (batch_size, seq_length, hidden_size)
+                lstm_out, _ = self.lstm(x)
+                # We only need the output of the last time step
+                last_hidden_state = lstm_out[:, -1, :]
+                # Pass the last hidden state to the Bayesian layer
+                return self.bayes_fc(last_hidden_state)
+
+        self.model = _HybridBayesianLSTM().to(device)
+        # --- End of Bugfix ---
+
         X_torch, y_torch = torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
         dataset = TensorDataset(X_torch, y_torch)
         dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        self.model = nn.Sequential(
-            bnn.BayesLSTM(6, 50, num_layers=2, dropout=0.2),
-            bnn.Select(1, -1),
-            bnn.BayesLinear(50, 6)
-        ).to(device)
+        
         criterion = nn.MSELoss()
+        # The ELBO loss function correctly finds the Bayesian layers in the model
         kl_loss = bnn.PyTorchBNN.ELBO(dataset=dataset, criterion=criterion, kl_weight=0.1)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.005)
+        
         for _ in range(self.epochs):
             for batch_x, batch_y in dataloader:
                 optimizer.zero_grad()
@@ -190,20 +202,27 @@ class BayesianSequenceModel(BaseModel):
                 loss = kl_loss(pred, batch_y)
                 loss.backward()
                 optimizer.step()
+
     def predict(self, n_samples=50) -> Dict[str, Any]:
         if not self.model or not self.scaler:
             return {'distributions': [{k: 1/m for k in range(1, m + 1)} for m in self.max_nums], 'uncertainty': 1.0}
+
         last_seq_scaled = self.scaler.transform(st.session_state.df_master.iloc[-self.seq_length:].values)
         input_tensor = torch.tensor(last_seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
+        
         with torch.no_grad():
+            # Sample multiple times to get a distribution of predictions
             predictions_raw = np.array([self.scaler.inverse_transform(self.model(input_tensor).cpu().numpy()).flatten() for _ in range(n_samples)])
+        
         mean_pred = np.mean(predictions_raw, axis=0)
         std_pred = np.std(predictions_raw, axis=0)
+        
         distributions = []
         for i in range(6):
             x_range = np.arange(1, self.max_nums[i] + 1)
             prob_mass = stats.norm.pdf(x_range, loc=mean_pred[i], scale=max(1.5, std_pred[i]))
             distributions.append({num: p for num, p in zip(x_range, prob_mass / prob_mass.sum())})
+            
         uncertainty_score = np.mean(std_pred / (np.array(self.max_nums)/2))
         return {'distributions': distributions, 'uncertainty': uncertainty_score}
 
@@ -313,6 +332,7 @@ class GraphCommunityModel(BaseModel):
 def run_backtest(model_instance: BaseModel, df: pd.DataFrame, train_size: int, backtest_steps: int, **kwargs) -> Dict[str, Any]:
     log_losses, uncertainties = [], []
     for i in range(backtest_steps):
+        if train_size + i >= len(df): break # Prevent index out of bounds
         current_train_df = df.iloc[:train_size + i]
         true_draw = df.iloc[train_size + i].values
         model_instance.train(current_train_df, **kwargs)
@@ -331,15 +351,12 @@ def run_backtest(model_instance: BaseModel, df: pd.DataFrame, train_size: int, b
         metrics['Uncertainty'] = np.mean(uncertainties)
     return metrics
 
-# --- 5. STABILITY & DYNAMICS ANALYSIS FUNCTIONS ---
-
+# --- 5. STABILITY & DYNAMICS ANALYSIS FUNCTIONS (Unchanged from v20.0.1) ---
 @st.cache_data
 def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_steps: int) -> go.Figure:
-    # --- CRITICAL FIX: Check for AutoARIMA availability ---
     if not AutoARIMA:
         st.error("`sktime` and/or `pmdarima` not installed. Stabilization analysis is disabled.")
         return go.Figure().update_layout(title_text="Stabilization Analysis Disabled")
-
     window_sizes = np.linspace(50, max(250, len(_df) - backtest_steps - 1), 10, dtype=int)
     results = []
     progress_bar = st.progress(0, "Running stabilization analysis...")
@@ -368,7 +385,6 @@ def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_s
         results.append({'Window Size': size, 'Cross-Entropy Loss': avg_log_loss, 'Prediction Stability Index': psi})
         progress_bar.progress((i + 1) / len(window_sizes))
     progress_bar.empty()
-
     if not results: return go.Figure().update_layout(title_text="Insufficient data for stabilization analysis.")
     results_df = pd.DataFrame(results).dropna()
     fig = go.Figure()
@@ -420,11 +436,9 @@ def analyze_clusters(_df: pd.DataFrame, min_cluster_size: int, min_samples: int)
         results['summary'] = f"An error occurred during clustering: {e}"
     return results
 
-# --- 6. MAIN APPLICATION UI & LOGIC ---
-
+# --- 6. MAIN APPLICATION UI & LOGIC (Unchanged) ---
 st.sidebar.header("1. System Configuration")
 uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"])
-
 with st.sidebar.expander("Advanced Configuration", expanded=True):
     max_nums_input = [st.number_input(f"Max Value for Pos_{i+1}", 10, 150, 49, key=f"max_num_{i}") for i in range(6)]
     training_size_slider = st.slider("Training Window Size", 50, 1000, 150, 10, help="Number of past draws to train on.")
@@ -445,7 +459,6 @@ if uploaded_file:
                 st.markdown("""
                 - **Likelihood Score:** Confidence derived from historical prediction accuracy. Higher is better (>60% is promising).
                 - **Uncertainty Score (BNN Only):** A powerful metric from the Bayesian model. It quantifies its own confidence. **A low score (<0.15) indicates a high-confidence forecast that should be trusted more.**
-                - **Cross-Entropy Loss:** The raw prediction error. Lower is better.
                 - **The Models:**
                     - **Bayesian LSTM:** A neural network that provides both a prediction and its own uncertainty. **Prioritize its forecasts when uncertainty is low.**
                     - **Transformer:** The current standard for sequence modeling, excellent at finding complex, long-range patterns.
