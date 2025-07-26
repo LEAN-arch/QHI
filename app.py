@@ -1,9 +1,9 @@
 # ======================================================================================================
-# LottoSphere v16.0.12: The Quantum Chronodynamics Engine (Final)
+# LottoSphere v16.0.13: The Quantum Chronodynamics Engine (Final)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.12 (Final)
+# VERSION: 16.0.13 (Final)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -11,10 +11,10 @@
 # clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
 # robust backtesting methodology for single-position models.
 #
-# CHANGELOG (from v16.0.11 to v16.0.12):
-# - FIXED: Added a re-normalization step in the MCMC sampling to prevent "probabilities do not sum to 1"
-#   errors caused by floating-point inaccuracies.
-# - DEPENDENCY: Pinned scipy version to be compatible with pmdarima.
+# CHANGELOG (from v16.0.12 to v16.0.13):
+# - FIXED: Corrected an AttributeError ('numpy.ndarray' object has no attribute 'iloc') by
+#   changing the indexer for the AutoARIMA prediction from .iloc[0] to [0] to match the
+#   output type of the current library version.
 # ======================================================================================================
 
 import streamlit as st
@@ -55,7 +55,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.12: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.13: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -208,7 +208,6 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     if not (0 <= current_state < max_num):
         current_state = np.random.randint(0, max_num)
         
-    # FIXED: Re-normalize the probability vector to ensure it sums to 1
     prob_vector = trans_prob[current_state]
     prob_vector /= prob_vector.sum()
     
@@ -278,7 +277,9 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
 
         sarima_model = AutoARIMA(sp=1, suppress_warnings=True)
         sarima_model.fit(series)
-        sarima_pred = int(np.clip(np.round(sarima_model.predict(fh=[1]).iloc[0]), 1, max_num))
+        # FIXED: Use [0] for numpy array instead of .iloc[0] for pandas series
+        prediction_result = sarima_model.predict(fh=[1])
+        sarima_pred = int(np.clip(np.round(prediction_result[0]), 1, max_num))
         results['sarima_pred'] = sarima_pred
 
         ml_results = _analyze_ml_models(series, max_num)
@@ -517,7 +518,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.12: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.13: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 st.sidebar.header("Configuration")
