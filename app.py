@@ -499,7 +499,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                     for val in base_pred:
                         candidate = val
                         while candidate in seen:
-                            candidate = np.random.randint(1, max_nums[final_preds.__len__()] + 1)
+                            candidate = np.random.randint(1, max_nums[len(final_preds)] + 1)
                         final_preds.append(candidate)
                         seen.add(candidate)
                     
