@@ -14,6 +14,7 @@
 # - v17.0.2: Removed tensorflow dependencies, simplified to PyTorch, added probabilistic forecasting.
 # - Fixed streamlit-rich conflict, removed pywt, added robust error handling.
 # - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
+# - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -243,7 +244,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
     try:
-        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
+        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params nonin='st', init_params='st')
         hmm.fit(hmm_series)
         last_state = hmm.predict(hmm_series)[-1]
         next_state = np.argmax(hmm.transmat_[last_state])
@@ -429,7 +430,12 @@ if uploaded_file:
     if not df_master.empty and df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         with st.spinner("Analyzing system stability..."):
-            stable_positions = [pos for pos in df_master.columns if analyze_teminal_behavior(df_master, pos).get('is_stable', False)]
+            stable_positions = []
+            for pos in df_master.columns:
+                result = analyze_temporal_behavior(df_master, pos)
+                if result.get('is_stable', False):
+                    stable_positions.append(pos)
+                st.session_state.data_warnings.append(f"{pos} stability: Lyapunov={result.get('lyapunov', 'N/A')}, Stable={result.get('is_stable', False)}")
         if stable_positions:
             st.sidebar.info(f"Stable positions detected: {', '.join(stable_positions)}.")
         else:
