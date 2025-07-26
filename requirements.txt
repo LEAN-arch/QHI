@@ -7,7 +7,6 @@ scikit-learn
 scipy<1.16
 nolds
 statsmodels
-tensorflow-probability[tf]
 prophet
 hmmlearn
 sktime
