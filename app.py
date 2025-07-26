@@ -1,9 +1,9 @@
 # ======================================================================================================
-# LottoSphere v16.0.9: The Quantum Chronodynamics Engine (Final Correction)
+# LottoSphere v16.0.10: The Quantum Chronodynamics Engine (Final)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.9 (Final Correction)
+# VERSION: 16.0.10 (Final)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -11,9 +11,9 @@
 # clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
 # robust backtesting methodology for single-position models.
 #
-# CHANGELOG (from v16.0.8 to v16.0.9):
-# - FIXED: Removed the unused import for 'sktime.annotation.adapters.PyODAnnotator'.
-#   The change-point detection feature was removed during optimization, but the import was left by mistake.
+# CHANGELOG (from v16.0.9 to v16.0.10):
+# - FIXED: Corrected a NumPy TypeError in the recurrence plot calculation by avoiding an
+#   in-place float division on an integer array.
 # ======================================================================================================
 
 import streamlit as st
@@ -46,7 +46,6 @@ import tensorflow_probability as tfp
 from prophet import Prophet
 from hmmlearn.hmm import MultinomialHMM
 from sktime.forecasting.arima import AutoARIMA
-# from sktime.annotation.adapters import PyODAnnotator # <-- THIS LINE HAS BEEN REMOVED
 
 # --- Deep Learning (PyTorch) ---
 import torch
@@ -55,7 +54,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.9: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.10: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -158,10 +157,10 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
         series = _df[position].values
 
         # Recurrence Plot
-        len_series = len(series)
         recurrence_matrix = np.abs(np.subtract.outer(series, series))
-        recurrence_matrix /= recurrence_matrix.max() + 1e-10
-        results['recurrence_fig'] = px.imshow(recurrence_matrix, color_continuous_scale='viridis', title=f"Recurrence Plot ({position})")
+        # FIXED: Avoid in-place division on an integer array. Create a new float array instead.
+        normalized_recurrence = recurrence_matrix / (recurrence_matrix.max() + 1e-10)
+        results['recurrence_fig'] = px.imshow(normalized_recurrence, color_continuous_scale='viridis', title=f"Recurrence Plot ({position})")
 
         # Fourier Analysis (Power Spectral Density)
         freqs, psd = welch(series, nperseg=min(len(series), 256))
@@ -175,7 +174,7 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
 
         # Lyapunov Exponent
         try:
-            lyap_exp = lyap_r(series, emb_dim=3, lag=1, min_tsep=len_series//10)
+            lyap_exp = lyap_r(series, emb_dim=3, lag=1, min_tsep=len(series)//10)
             results['lyapunov'] = lyap_exp
             results['is_stable'] = (lyap_exp <= 0.05) # Loosen threshold slightly
         except Exception:
@@ -542,7 +541,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.9: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.10: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 # --- Sidebar Configuration ---
