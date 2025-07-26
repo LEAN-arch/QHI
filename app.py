@@ -15,6 +15,7 @@
 # - Fixed streamlit-rich conflict, removed pywt, added robust error handling.
 # - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
+# - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -244,7 +245,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
     try:
-        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params nonin='st', init_params='st')
+        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
         hmm.fit(hmm_series)
         last_state = hmm.predict(hmm_series)[-1]
         next_state = np.argmax(hmm.transmat_[last_state])
@@ -254,7 +255,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
             st.warning("HMM emission probabilities not available.")
             results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         else:
-            results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs) if 1 <= i+1 <= max_num}
+            results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
     except Exception as e:
         st.warning(f"HMM model failed: {e}")
         results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
