@@ -5,7 +5,16 @@
 #
 # DESCRIPTION:
 # This is the final, stable, and feature-complete version of the application, incorporating
-# probabilistic forecasting and all accumulated bug fixes.
+# probabilistic forecasting and all accumulated bug fixes. Models each of six sorted number
+# positions as an independent yet interacting dynamical system, using deep learning, statistical
+# physics, and time-series analysis. Enhanced with spectrogram-based time-frequency analysis
+# and robust error handling for stable operation.
+#
+# CHANGELOG:
+# - v17.0.2: Removed tensorflow dependencies, simplified to PyTorch, added probabilistic forecasting.
+# - Fixed streamlit-rich conflict, removed pywt, added robust error handling.
+# - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
+# - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
 import streamlit as st
@@ -116,24 +125,24 @@ def create_sequences(data: np.ndarray, seq_length: int) -> Tuple[np.ndarray, np.
 
 def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int]) -> List[int]:
     """Extracts a unique set of numbers from the modes of probability distributions."""
-    best_guesses = [max(dist, key=dist.get) for dist in distributions]
-    final_set = []
+    best_guesses = []
     seen = set()
-    for i, guess in enumerate(best_guesses):
-        candidate = guess
-        while candidate in seen:
-            sorted_dist = sorted(distributions[i].items(), key=lambda item: item[1], reverse=True)
-            for num, prob in sorted_dist:
+    for i, dist in enumerate(distributions):
+        if not dist:  # Handle empty distribution
+            available = set(range(1, max_nums[i] + 1)) - seen
+            guess = np.random.choice(list(available)) if available else np.random.randint(1, max_nums[i] + 1)
+        else:
+            sorted_dist = sorted(dist.items(), key=lambda item: item[1], reverse=True)
+            for num, _ in sorted_dist:
                 if num not in seen:
-                    candidate = num
+                    guess = num
                     break
-            if candidate in seen:
+            else:
                 available = set(range(1, max_nums[i] + 1)) - seen
-                candidate = np.random.choice(list(available)) if available else np.random.randint(1, max_nums[i]+1)
-        final_set.append(candidate)
-        seen.add(candidate)
-    return sorted(final_set)
-
+                guess = np.random.choice(list(available)) if available else np.random.randint(1, max_nums[i] + 1)
+        best_guesses.append(guess)
+        seen.add(guess)
+    return sorted(best_guesses)
 
 # --- 3. TIME-DEPENDENT BEHAVIOR ANALYSIS MODULE ---
 @st.cache_data
@@ -142,20 +151,36 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
     try:
         results = {}
         series = _df[position].values
+        if len(series) < 10:  # Prevent crashes on short series
+            st.warning(f"Insufficient data for {position} analysis (<10 draws).")
+            return results
+
+        # Recurrence Plot
         recurrence_matrix = np.abs(np.subtract.outer(series, series))
         normalized_recurrence = recurrence_matrix / (recurrence_matrix.max() + 1e-10)
         results['recurrence_fig'] = px.imshow(normalized_recurrence, color_continuous_scale='viridis', title=f"Recurrence Plot ({position})")
+
+        # Fourier Analysis
         freqs, psd = welch(series, nperseg=min(len(series), 256))
         psd_df = pd.DataFrame({'Frequency': freqs, 'Power': psd}).sort_values('Power', ascending=False)
         results['fourier_fig'] = px.line(psd_df, x='Frequency', y='Power', title=f"Power Spectral Density ({position})")
+
+        # Spectrogram
         f, t, Sxx = spectrogram(series, fs=1.0, nperseg=min(128, len(series)//2), noverlap=int(min(128, len(series)//2)*0.9))
         results['spectrogram_fig'] = go.Figure(data=go.Heatmap(z=10 * np.log10(Sxx + 1e-10), x=t, y=f, colorscale='viridis'))
         results['spectrogram_fig'].update_layout(title=f'Spectrogram ({position})', xaxis_title='Time', yaxis_title='Frequency')
+
+        # Lyapunov Exponent
         try:
-            lyap_exp = lyap_r(series, emb_dim=3, lag=1, min_tsep=len(series)//10)
-            results['lyapunov'], results['is_stable'] = lyap_exp, (lyap_exp <= 0.05)
+            lyap_exp = lyap_r(series, emb_dim=max(2, len(series)//10), lag=1, min_tsep=len(series)//10)
+            results['lyapunov'] = lyap_exp
+            results['is_stable'] = lyap_exp <= 0.05
         except Exception:
-            results['lyapunov'], results['is_stable'] = -1, True
+            results['lyapunov'] = float('nan')
+            results['is_stable'] = False
+            st.warning(f"Lyapunov exponent calculation failed for {position}.")
+
+        # Periodicity Analysis for Stable Positions
         if results['is_stable']:
             acf_vals = acf(series, nlags=min(50, len(series)//2 - 1), fft=True)
             lags = np.arange(len(acf_vals))
@@ -163,18 +188,20 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
             significant_peaks_indices = np.where(acf_vals[1:] > conf_interval)[0]
             if significant_peaks_indices.size > 0:
                 dominant_period = lags[1:][significant_peaks_indices[0]]
-                results['periodicity'], results['periodicity_description'] = dominant_period, f"Potential periodicity with a dominant period of {dominant_period} draws."
+                results['periodicity'] = dominant_period
+                results['periodicity_description'] = f"Potential periodicity with a dominant period of {dominant_period} draws."
             else:
-                results['periodicity'], results['periodicity_description'] = None, "No significant periodicity detected."
+                results['periodicity'] = None
+                results['periodicity_description'] = "No significant periodicity detected."
             acf_df = pd.DataFrame({'Lag': lags, 'Autocorrelation': acf_vals})
             results['acf_fig'] = px.line(acf_df, x='Lag', y='Autocorrelation', title=f'Autocorrelation Function ({position})', markers=True)
             results['acf_fig'].add_hline(y=conf_interval, line_dash="dash", line_color="red")
             results['acf_fig'].add_hline(y=-conf_interval, line_dash="dash", line_color="red")
+
         return results
     except Exception as e:
-        st.error(f"Error in temporal behavior analysis: {e}")
+        st.error(f"Error in temporal behavior analysis for {position}: {e}")
         return {}
-
 
 # --- 4. ADVANCED STABLE POSITION ANALYSIS (REFACTORED) ---
 def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
@@ -187,7 +214,8 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
             counts[from_idx, to_idx] += 1
     trans_prob = (counts + 1e-10) / (counts.sum(axis=1, keepdims=True) + 1e-9)
     current_state = series[-1] - 1
-    if not (0 <= current_state < max_num): current_state = np.random.randint(0, max_num)
+    if not (0 <= current_state < max_num):
+        current_state = np.random.randint(0, max_num)
     prob_vector = trans_prob[current_state]
     prob_vector /= prob_vector.sum()
     mcmc_samples = [np.random.choice(max_num, p=prob_vector) for _ in range(5000)]
@@ -214,12 +242,21 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
-    hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
-    hmm.fit(hmm_series)
-    last_state = hmm.predict(hmm_series)[-1]
-    next_state = np.argmax(hmm.transmat_[last_state])
-    emission_probs = hmm.emission_prob_[next_state]
-    results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs)}
+    try:
+        hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
+        hmm.fit(hmm_series)
+        last_state = hmm.predict(hmm_series)[-1]
+        next_state = np.argmax(hmm.transmat_[last_state])
+        # Use correct attribute name for hmmlearn==0.3.2
+        emission_probs = getattr(hmm, 'emissionprobs_', None)
+        if emission_probs is None:
+            st.warning("HMM emission probabilities not available.")
+            results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
+        else:
+            results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs) if 1 <= i+1 <= max_num}
+    except Exception as e:
+        st.warning(f"HMM model failed: {e}")
+        results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
     return results
 
 @st.cache_data
@@ -230,30 +267,33 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         series = _df[position].values
         stat_phys_results = _analyze_stat_physics(series, max_num)
         results.update(stat_phys_results)
-        sarima_model = AutoARIMA(sp=1, suppress_warnings=True)
-        sarima_model.fit(series)
-        pred_point = sarima_model.predict(fh=[1])[0]
-        conf_int = sarima_model.predict_interval(fh=[1], coverage=0.95)
-        std_dev = max(1.0, (conf_int.iloc[0, 1] - conf_int.iloc[0, 0]) / 3.92)
-        x_range = np.arange(1, max_num + 1)
-        prob_mass = stats.norm.pdf(x_range, loc=pred_point, scale=std_dev)
-        prob_mass /= prob_mass.sum()
-        results['sarima_dist'] = {int(num): prob for num, prob in zip(x_range, prob_mass)}
+        try:
+            sarima_model = AutoARIMA(sp=1, suppress_warnings=True)
+            sarima_model.fit(series)
+            pred_point = sarima_model.predict(fh=[1])[0]
+            conf_int = sarima_model.predict_interval(fh=[1], coverage=0.95)
+            std_dev = max(1.0, (conf_int.iloc[0, 1] - conf_int.iloc[0, 0]) / 3.92)
+            x_range = np.arange(1, max_num + 1)
+            prob_mass = stats.norm.pdf(x_range, loc=pred_point, scale=std_dev)
+            prob_mass /= prob_mass.sum()
+            results['sarima_dist'] = {int(num): prob for num, prob in zip(x_range, prob_mass)}
+        except Exception:
+            st.warning(f"SARIMA model failed for {position}.")
+            results['sarima_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         ml_results = _analyze_ml_models(series, max_num)
         results.update(ml_results)
-        all_dists = [results['mcmc_dist'], results['sarima_dist'], results['hmm_dist']]
+        all_dists = [results.get('mcmc_dist', {}), results.get('sarima_dist', {}), results.get('hmm_dist', {})]
         ensemble_dist = {i: 0.0 for i in range(1, max_num + 1)}
         for dist in all_dists:
             for num, prob in dist.items():
                 if 1 <= num <= max_num:
                     ensemble_dist[num] += prob
-        total_prob = sum(ensemble_dist.values())
+        total_prob = sum(ensemble_dist.values()) or 1
         results['distributions'] = [{num: prob / total_prob for num, prob in ensemble_dist.items()}]
         return results
     except Exception as e:
         st.error(f"Error in stable position analysis for {position}: {e}")
-        return {}
-
+        return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)}]}
 
 # --- 5. ADVANCED PREDICTIVE MODELS ---
 @st.cache_resource
@@ -298,7 +338,9 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
     """Generates a probabilistic prediction using a trained PyTorch model."""
     try:
         model, scaler, best_loss = _model_cache
-        if model is None: raise ValueError(f"{model_type} model training failed.")
+        if model is None:
+            st.warning(f"{model_type} model training failed.")
+            return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
         last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
         last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
         with torch.no_grad():
@@ -315,8 +357,7 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
         return {'name': model_type, 'distributions': distributions, 'logic': f'Deep learning {model_type} sequence forecast.'}
     except Exception as e:
         st.warning(f"Prediction with {model_type} failed: {e}")
-        return {}
-
+        return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
 
 # --- 6. Backtesting & Meta-Analysis ---
 @st.cache_data
@@ -335,8 +376,9 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 3, max_nums),
             'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 3, max_nums),
         }
-        for pos in stable_positions:
-             model_funcs[f'Stable_{pos}'] = lambda d, p=pos: analyze_stable_position_dynamics(d, p, max_nums[int(p.split("_")[1])-1])
+        if stable_positions:  # Only add stable position models if available
+            for pos in stable_positions:
+                model_funcs[f'Stable_{pos}'] = lambda d, p=pos: analyze_stable_position_dynamics(d, p, max_nums[int(p.split("_")[1])-1])
         progress_bar = st.progress(0, text="Backtesting models...")
         total_steps = len(val_df) * len(model_funcs)
         current_step = 0
@@ -345,7 +387,8 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             for i in range(len(val_df)):
                 historical_df = _df.iloc[:split_point + i]
                 pred_obj = func(historical_df)
-                if not pred_obj or not pred_obj.get('distributions'): continue
+                if not pred_obj or not pred_obj.get('distributions'):
+                    continue
                 y_true = val_df.iloc[i].values
                 draw_log_loss = 0
                 for pos_idx, dist in enumerate(pred_obj['distributions']):
@@ -369,28 +412,46 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         st.error(f"Error in backtesting suite: {e}")
         return []
 
-
 # ====================================================================================================
 # Main Application UI & Logic
 # ====================================================================================================
 st.title("⚛️ LottoSphere v17.0.2: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis, now upgraded with **probabilistic forecasting**.")
+
 st.sidebar.header("Configuration")
 max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=150, value=49 + (i * 2), key=f"max_num_pos_{i+1}") for i in range(6)]
 uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="CSV file with one draw per row, numbers in columns. Most recent draw should be the last row.")
+
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
-    for warning_msg in st.session_state.data_warnings: st.warning(warning_msg)
+    for warning_msg in st.session_state.data_warnings:
+        st.warning(warning_msg)
     if not df_master.empty and df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         with st.spinner("Analyzing system stability..."):
-            stable_positions = [pos for pos in df_master.columns if analyze_temporal_behavior(df_master, pos).get('is_stable', False)]
-        if stable_positions: st.sidebar.info(f"Stable positions detected: {', '.join(stable_positions)}.")
+            stable_positions = [pos for pos in df_master.columns if analyze_teminal_behavior(df_master, pos).get('is_stable', False)]
+        if stable_positions:
+            st.sidebar.info(f"Stable positions detected: {', '.join(stable_positions)}.")
+        else:
+            st.sidebar.info("No stable positions detected.")
         tab1, tab2 = st.tabs(["🔮 Probabilistic Forecasting", "🔬 System Dynamics Explorer"])
         with tab1:
             st.header("Engage Grand Unified Predictive Ensemble")
             with st.expander("Explanation of Probabilistic Forecasts"):
-                st.markdown("""...""")
+                st.markdown("""
+                ### Overview
+                The Probabilistic Forecasting tab generates probability distributions for the next lottery draw using LSTM, GRU, and stable position models (MCMC, SARIMA, HMM). Predictions are ranked by historical performance (log loss) on a validation set.
+
+                ### Models
+                - **LSTM/GRU**: Deep learning models capturing sequential patterns.
+                - **Stable Position Models**: For stable positions (Lyapunov exponent ≤ 0.05), combine MCMC (Markov Chain Monte Carlo), SARIMA (time-series forecasting), and HMM (Hidden Markov Model).
+                - **Backtesting**: Uses walk-forward validation to compute average log loss, converted to a likelihood score (100 - 15 × log loss).
+
+                ### Actionability
+                - Select high-likelihood predictions (>70%) for number sets.
+                - Review probability distributions for each position to assess confidence.
+                - Cross-validate with System Dynamics Explorer for stable positions.
+                """)
             if st.button("🚀 RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
                 with st.spinner("Backtesting all models... This is a deep computation and may take several minutes."):
                     scored_predictions = run_full_backtest_suite(df_master, max_nums, stable_positions)
@@ -417,9 +478,43 @@ if uploaded_file:
                                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         with tab2:
             st.header("System Dynamics Explorer")
+            with st.expander("Explanation of System Dynamics"):
+                st.markdown("""
+                ### Overview
+                Analyzes the temporal behavior of a selected position using chaos theory and time-series analysis.
+
+                ### Outputs
+                - **Recurrence Plot**: Visualizes state recurrences.
+                - **Power Spectral Density (Fourier)**: Identifies dominant cycles.
+                - **Spectrogram**: Maps time-varying frequency content.
+                - **Lyapunov Exponent**: Quantifies chaos (positive) or stability (≤0.05).
+                - **Periodicity Analysis**: Detects cycles for stable positions.
+
+                ### Actionability
+                - Stable positions (Lyapunov ≤0.05) suggest predictable patterns; use their predictions in Tab 1.
+                - Cross-reference periodicity with forecast distributions.
+                """)
             position = st.selectbox("Select Position to Analyze", options=df_master.columns, index=0)
             if st.button(f"Analyze Dynamics for {position}", use_container_width=True):
-                 st.info("This tab provides analysis of the system's underlying dynamics.")
-
+                with st.spinner(f"Analyzing dynamics for {position}..."):
+                    dynamic_results = analyze_temporal_behavior(df_master, position=position)
+                if dynamic_results:
+                    st.subheader(f"Chaotic & Cyclical Analysis ({position})")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.plotly_chart(dynamic_results.get('recurrence_fig'), use_container_width=True)
+                    with col2:
+                        st.plotly_chart(dynamic_results.get('fourier_fig'), use_container_width=True)
+                    st.plotly_chart(dynamic_results.get('spectrogram_fig'), use_container_width=True)
+                    if not np.isnan(dynamic_results.get('lyapunov', float('nan'))):
+                        if dynamic_results['lyapunov'] > 0.05:
+                            st.warning(f"**Lyapunov Exponent:** {dynamic_results['lyapunov']:.4f}. System is chaotic.", icon="⚠️")
+                        else:
+                            st.success(f"**Lyapunov Exponent:** {dynamic_results['lyapunov']:.4f}. System is stable.", icon="✅")
+                            if dynamic_results.get('periodicity_description'):
+                                st.info(f"**Periodicity Analysis:** {dynamic_results['periodicity_description']}", icon="🔄")
+                                st.plotly_chart(dynamic_results.get('acf_fig'), use_container_width=True)
+                    else:
+                        st.warning("Lyapunov exponent calculation failed.")
 else:
     st.info("Please upload a CSV file to begin analysis.")
