@@ -1,25 +1,16 @@
-# requirements.txt for LottoSphere v16.0.2
-# Compatible with Python 3.11
-# Install with: pip install -r requirements.txt
-
-streamlit==1.35.0 
-pandas==2.2.2 
-numpy==1.26.4 
-plotly==5.22.0 
-matplotlib==3.8.4 
-scikit-learn==1.5.0 
-umap-learn==0.5.6 
-hdbscan==0.8.33 
-scipy==1.13.1 
-nolds==0.5.2 
-statsmodels==0.14.2 
-torch==2.3.0 
-tensorflow==2.16.1 
-tf_keras==2.16.1 
-tensorflow-probability==0.24.0 
-PyEMD==1.0.0 
-prophet==1.1.5 
-hmmlearn==0.3.2 
-networkx==3.3 
-sktime==0.30.1 
-rich==13.7.1
+streamlit
+pandas
+numpy
+plotly
+matplotlib
+scikit-learn
+scipy
+nolds
+statsmodels
+tensorflow
+tensorflow-probability
+PyEMD
+prophet
+hmmlearn
+sktime
+torch
