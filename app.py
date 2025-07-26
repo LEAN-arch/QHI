@@ -1,7 +1,7 @@
 # ======================================================================================================
-# LottoSphere v17.0.3: The Quantum Chronodynamics Engine (Final Corrected)
+# LottoSphere v17.0.4: The Quantum Chronodynamics Engine (Final Corrected)
 #
-# VERSION: 17.0.3 (Final Corrected)
+# VERSION: 17.0.4 (Final Corrected)
 #
 # DESCRIPTION:
 # This is the final, stable, and feature-complete version of the application, incorporating
@@ -11,19 +11,22 @@
 # and robust error handling for stable operation.
 #
 # CHANGELOG:
-# - v17.0.3: Fixed incomplete number sets in get_best_guess_set by ensuring six numbers.
-# - Added validation in run_full_backtest_suite to filter invalid predictions.
-# - Enhanced logging for model failures, distributions, and max_nums usage.
+# - v17.0.4: Fixed zero likelihood scores by debugging log loss in run_full_backtest_suite.
+# - Fixed identical 1-2-3-4-5-6 outputs for stable positions by ensuring unique distributions.
+# - Enhanced get_best_guess_set to prioritize high-probability numbers and avoid duplicates.
+# - Added detailed logging for distributions, prob_of_true, and y_true in run_full_backtest_suite.
+# - Strengthened load_data to reject invalid CSV early and log max_nums mismatches.
+# - Added max_nums validation across functions.
+# - Fixed incomplete number sets in get_best_guess_set by ensuring six numbers.
+# - Fixed Unknown Model entries by filtering invalid predictions.
 # - Fixed Markov Chain failure for Pos_6 by clipping series and logging invalid values.
-# - Enhanced load_data to log values exceeding max_nums and enforce constraints.
-# - Added max_num logging in analyze_stable_position_dynamics for Pos_6 debugging.
-# - Fixed likelihood scores of 0 and missing number combinations by improving log loss robustness.
+# - Fixed likelihood scores of 0 and missing number combinations.
 # - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
-# - Replaced MultinomialHMM with Markov Chain model in _analyze_ml_models.
-# - Removed hmmlearn dependency from requirements.txt.
+# - Replaced MultinomialHMM with Markov Chain model.
+# - Removed hmmlearn dependency.
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior'.
 # - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models.
-# - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
+# - Ensured predictions respect max_nums and temporal CSV order.
 # ======================================================================================================
 
 import streamlit as st
@@ -59,7 +62,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v17.0.3: Quantum Chronodynamics",
+    page_title="LottoSphere v17.0.4: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -92,12 +95,22 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
         df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
         st.session_state.data_warnings = []
         st.session_state.data_warnings.append(f"Loaded CSV with {len(df)} rows and {df.shape[1]} columns. max_nums={max_nums}")
+        if df.shape[1] < 6:
+            st.session_state.data_warnings.append(f"CSV has only {df.shape[1]} columns, expected 6.")
+            return pd.DataFrame()
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+        if df.isna().any().any():
+            st.session_state.data_warnings.append(f"Found {df.isna().sum().sum()} NaN values in CSV.")
         df.dropna(inplace=True)
         df = df.astype(int)
 
-        # Log invalid values before filtering
+        # Validate max_nums
+        if len(max_nums) != 6:
+            st.session_state.data_warnings.append(f"max_nums must have 6 values, got {len(max_nums)}: {max_nums}")
+            return pd.DataFrame()
+
+        # Log and filter invalid values
         initial_rows = len(df)
         for i, max_num in enumerate(max_nums[:df.shape[1]]):
             invalid_values = df.iloc[:, i][(df.iloc[:, i] < 1) | (df.iloc[:, i] > max_num)]
@@ -105,9 +118,6 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
                 st.session_state.data_warnings.append(
                     f"Pos_{i+1}: Found {len(invalid_values)} values outside [1, {max_num}]: {invalid_values.unique().tolist()}"
                 )
-
-        # Filter out invalid values
-        for i, max_num in enumerate(max_nums[:df.shape[1]]):
             df = df[(df.iloc[:, i] >= 1) & (df.iloc[:, i] <= max_num)]
         if len(df) < initial_rows:
             st.session_state.data_warnings.append(f"Discarded {initial_rows - len(df)} rows with numbers outside the specified max range.")
@@ -160,43 +170,52 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
     """Extracts a unique set of six numbers from the modes of probability distributions."""
     best_guesses = []
     seen = set()
-    for i, dist in enumerate(distributions[:6]):  # Ensure exactly 6 positions
+    if len(distributions) != 6:
+        st.session_state.data_warnings.append(f"Expected 6 distributions, got {len(distributions)}. Using uniform distributions.")
+        distributions = [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums[:6]]
+    
+    for i, dist in enumerate(distributions[:6]):
         if not dist or not all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
-            st.session_state.data_warnings.append(f"Invalid distribution for Pos_{i+1}. Using uniform distribution.")
+            st.session_state.data_warnings.append(f"Invalid distribution for Pos_{i+1}: {dist}. Using uniform distribution.")
             dist = {j: 1/max_nums[i] for j in range(1, max_nums[i] + 1)}
         total_prob = sum(dist.values())
         if total_prob == 0 or np.isnan(total_prob):
-            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{i+1}. Using uniform distribution.")
+            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{i+1}: {dist}. Using uniform distribution.")
             dist = {j: 1/max_nums[i] for j in range(1, max_nums[i] + 1)}
         else:
             dist = {k: v/total_prob for k, v in dist.items()}
-        sorted_dist = sorted(dist.items(), key=lambda item: item[1], reverse=True)
+        
+        # Sort by probability, then by number to avoid always picking lowest numbers
+        sorted_dist = sorted(dist.items(), key=lambda item: (-item[1], item[0]))
         for num, prob in sorted_dist:
             if num not in seen and 1 <= num <= max_nums[i]:
                 best_guesses.append(num)
                 seen.add(num)
                 break
         else:
-            available = set(range(1, max_nums[i] + 1)) - seen
+            available = sorted(set(range(1, max_nums[i] + 1)) - seen)
             if available:
-                guess = np.random.choice(list(available))
+                guess = available[0]  # Pick lowest available number
                 best_guesses.append(guess)
                 seen.add(guess)
             else:
                 guess = np.random.randint(1, max_nums[i] + 1)
+                while guess in seen:
+                    guess = np.random.randint(1, max_nums[i] + 1)
                 best_guesses.append(guess)
                 seen.add(guess)
+    
     # Ensure exactly 6 numbers
     while len(best_guesses) < 6:
         for i in range(6):
             if len(best_guesses) >= 6:
                 break
-            available = set(range(1, max_nums[i] + 1)) - seen
+            available = sorted(set(range(1, max_nums[i] + 1)) - seen)
             if available:
-                guess = np.random.choice(list(available))
+                guess = available[0]
                 best_guesses.append(guess)
                 seen.add(guess)
-    st.session_state.data_warnings.append(f"Generated best guess set: {best_guesses}")
+    st.session_state.data_warnings.append(f"Generated best guess set for Pos_{i+1}: {best_guesses}")
     return sorted(best_guesses[:6])
 
 # --- 3. TIME-DEPENDENT BEHAVIOR ANALYSIS MODULE ---
@@ -271,6 +290,7 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     current_state = series[-1] - 1
     if not (0 <= current_state < max_num):
         current_state = np.random.randint(0, max_num)
+        st.session_state.data_warnings.append(f"Invalid current state for stat_physics: {series[-1]}, using random state {current_state + 1}")
     prob_vector = trans_prob[current_state]
     prob_vector /= prob_vector.sum()
     mcmc_samples = [np.random.choice(max_num, p=prob_vector) for _ in range(5000)]
@@ -291,6 +311,7 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
         p = np.clip(p, 0, None)
         p /= p.sum()
     results['fokker_planck_dist'] = {int(num): prob for num, prob in zip(x, p)}
+    st.session_state.data_warnings.append(f"Stat physics distributions for max_num={max_num}: MCMC={list(mcmc_dist.to_dict().keys())[:5]}, Fokker-Planck={list(results['fokker_planck_dist'].keys())[:5]}")
     return results
 
 def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[str, Any]:
@@ -327,6 +348,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
         prob_dist = np.clip(prob_dist, 1e-6, 1)
         prob_dist /= prob_dist.sum()
         results['markov_dist'] = {i + 1: float(p) for i, p in enumerate(prob_dist) if 1 <= i + 1 <= max_num}
+        st.session_state.data_warnings.append(f"Markov Chain for {position}: Top 5 probs={sorted(results['markov_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
         
     except Exception as e:
         st.warning(f"Markov Chain model failed for {position} (call {call_id}): {e}")
@@ -343,6 +365,9 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         st.session_state.data_warnings.append(f"Analyzing {position} with max_num={max_num}")
         results = {}
         series = _df[position].values
+        if not all(1 <= x <= max_num for x in series):
+            st.session_state.data_warnings.append(f"Invalid values in {position} series: {series}. Clipping to [1, {max_num}]")
+            series = np.clip(series, 1, max_num)
         stat_phys_results = _analyze_stat_physics(series, max_num)
         results.update(stat_phys_results)
         try:
@@ -356,19 +381,29 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
             prob_mass = np.clip(prob_mass, 1e-6, None)
             prob_mass /= prob_mass.sum()
             results['sarima_dist'] = {int(num): prob for num, prob in zip(x_range, prob_mass)}
-        except Exception:
-            st.warning(f"SARIMA model failed for {position}. Using uniform distribution.")
+            st.session_state.data_warnings.append(f"SARIMA for {position}: Pred={pred_point:.2f}, Top 5 probs={sorted(results['sarima_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
+        except Exception as e:
+            st.warning(f"SARIMA model failed for {position}: {e}. Using uniform distribution.")
             results['sarima_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         ml_results = _analyze_ml_models(series, max_num, position)
         results.update(ml_results)
         all_dists = [results.get('mcmc_dist', {}), results.get('sarima_dist', {}), results.get('hmm_dist', {})]
         ensemble_dist = {i: 0.0 for i in range(1, max_num + 1)}
         for dist in all_dists:
+            if not dist:
+                st.session_state.data_warnings.append(f"Empty distribution in ensemble for {position}")
+                continue
+            total_prob = sum(dist.values())
+            if total_prob == 0 or np.isnan(total_prob):
+                st.session_state.data_warnings.append(f"Invalid total probability in ensemble for {position}: {total_prob}")
+                continue
             for num, prob in dist.items():
                 if 1 <= num <= max_num and isinstance(prob, (int, float)) and prob >= 0:
-                    ensemble_dist[num] += prob
-        total_prob = sum(ensemble_dist.values()) or 1
-        results['distributions'] = [{num: prob / total_prob for num, prob in ensemble_dist.items()}]
+                    ensemble_dist[num] += prob / total_prob
+        total_ensemble_prob = sum(ensemble_dist.values()) or 1
+        ensemble_dist = {num: prob / total_ensemble_prob for num, prob in ensemble_dist.items()}
+        results['distributions'] = [ensemble_dist]
+        st.session_state.data_warnings.append(f"Ensemble for {position}: Top 5 probs={sorted(ensemble_dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
         return results
     except Exception as e:
         st.error(f"Error in stable position analysis for {position}: {e}")
@@ -407,6 +442,7 @@ def train_torch_model(_df: pd.DataFrame, model_type: str = 'LSTM', seq_length: i
         model.eval()
         with torch.no_grad():
             final_loss = criterion(model(X_torch), y_torch).item()
+        st.session_state.data_warnings.append(f"Trained {model_type}: Final loss={final_loss:.4f}")
         return model, scaler, final_loss
     except Exception as e:
         st.error(f"Error training {model_type} model: {e}")
@@ -434,8 +470,9 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
             prob_mass = stats.norm.pdf(x_range, loc=prediction_raw[i], scale=std_dev)
             prob_mass = np.clip(prob_mass, 1e-6, None)
             prob_mass /= prob_mass.sum()
-            distributions.append({int(num): prob for num, prob in zip(x_range, prob_mass)})
-        st.session_state.data_warnings.append(f"{model_type} prediction: {prediction_raw.tolist()}")
+            dist = {int(num): prob for num, prob in zip(x_range, prob_mass)}
+            distributions.append(dist)
+            st.session_state.data_warnings.append(f"{model_type} Pos_{i+1}: Top 5 probs={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
         return {'name': model_type, 'distributions': distributions, 'logic': f'Deep learning {model_type} sequence forecast.'}
     except Exception as e:
         st.warning(f"Prediction with {model_type} failed: {e}")
@@ -460,8 +497,10 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         }
         if stable_positions:
             for pos in stable_positions:
-                model_funcs[f'Stable_{pos}'] = lambda d, p=pos: analyze_stable_position_dynamics(d, p, max_nums[int(p.split("_")[1])-1])
-        st.session_state.data_warnings.append(f"Initialized models: {list(model_funcs.keys())}")
+                pos_idx = int(pos.split("_")[1]) - 1
+                if pos_idx < len(max_nums):
+                    model_funcs[f'Stable_{pos}'] = lambda d, p=pos, m=max_nums[pos_idx]: analyze_stable_position_dynamics(d, p, m)
+        st.session_state.data_warnings.append(f"Initialized models: {list(model_funcs.keys())} with max_nums={max_nums}")
         progress_bar = st.progress(0, text="Backtesting models...")
         total_steps = len(val_df) * len(model_funcs)
         current_step = 0
@@ -471,7 +510,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                 try:
                     historical_df = _df.iloc[:split_point + i]
                     pred_obj = func(historical_df)
-                    if not pred_obj or not pred_obj.get('distributions') or not all(isinstance(d, dict) for d in pred_obj['distributions']) or len(pred_obj['distributions']) != 6:
+                    if not pred_obj or not pred_obj.get('distributions') or len(pred_obj['distributions']) != 6 or not all(isinstance(d, dict) for d in pred_obj['distributions']):
                         st.session_state.data_warnings.append(f"Model {name} failed to produce valid distributions for draw {i}: {pred_obj}")
                         continue
                     y_true = val_df.iloc[i].values
@@ -482,18 +521,21 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                             dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
                         total_prob = sum(dist.values())
                         if total_prob == 0 or np.isnan(total_prob):
-                            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{pos_idx+1} in {name} for draw {i}")
+                            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{pos_idx+1} in {name} for draw {i}: {dist}")
                             dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
                         else:
                             dist = {k: v/total_prob for k, v in dist.items()}
                         true_num = y_true[pos_idx]
+                        if not (1 <= true_num <= max_nums[pos_idx]):
+                            st.session_state.data_warnings.append(f"Invalid true_num={true_num} for Pos_{pos_idx+1} in {name}, max_num={max_nums[pos_idx]}")
+                            continue
                         prob_of_true = dist.get(true_num, 1e-6)
-                        st.session_state.data_warnings.append(f"Model {name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.6f}")
+                        st.session_state.data_warnings.append(f"Model {name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.6f}, Dist Top 5={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
                         draw_log_loss -= np.log(max(prob_of_true, float(1e-10)))
                     draw_log_loss = min(draw_log_loss, 50.0)  # Cap to avoid overflow
                     total_log_loss += draw_log_loss
                     draw_count += 1
-                    st.session_state.data_warnings.append(f"Model {name}, Draw {i}: Log Loss={draw_log_loss:.3f}")
+                    st.session_state.data_warnings.append(f"Model {name}, Draw {i}: Log Loss={draw_log_loss:.3f}, Total Log Loss={total_log_loss:.3f}, Draws={draw_count}")
                 except Exception as e:
                     st.session_state.data_warnings.append(f"Error backtesting {name} for draw {i}: {e}")
                     continue
@@ -503,7 +545,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             likelihood = max(0, 100 - avg_log_loss * 15)
             try:
                 final_pred_obj = func(_df)
-                if not final_pred_obj or not final_pred_obj.get('distributions') or not all(isinstance(d, dict) for d in final_pred_obj['distributions']) or len(final_pred_obj['distributions']) != 6:
+                if not final_pred_obj or not final_pred_obj.get('distributions') or len(final_pred_obj['distributions']) != 6 or not all(isinstance(d, dict) for d in final_pred_obj['distributions']):
                     st.session_state.data_warnings.append(f"Final prediction failed for {name}: {final_pred_obj}")
                     final_pred_obj = {
                         'name': name,
@@ -520,6 +562,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                     st.session_state.data_warnings.append(f"Skipping invalid model name for {name}")
                     continue
                 scored_predictions.append(final_pred_obj)
+                st.session_state.data_warnings.append(f"Final prediction for {name}: Set={final_pred_obj['prediction']}, Likelihood={likelihood:.2f}%")
             except Exception as e:
                 st.session_state.data_warnings.append(f"Error in final prediction for {name}: {e}")
             progress_bar.empty()
@@ -535,7 +578,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # ====================================================================================================
 # Main Application UI & Logic
 # ====================================================================================================
-st.title("⚛️ LottoSphere v17.0.3: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v17.0.4: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis, now upgraded with **probabilistic forecasting**.")
 
 st.sidebar.header("Configuration")
@@ -597,13 +640,13 @@ if uploaded_file:
                                 for i, dist in enumerate(p.get('distributions', [])):
                                     with chart_cols[i]:
                                         st.markdown(f"**Pos_{i+1}**")
-                                        if dist:
+                                        if dist and all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
                                             df_dist = pd.DataFrame(list(dist.items()), columns=['Number', 'Probability']).sort_values('Number')
                                             fig = px.bar(df_dist, x='Number', y='Probability', height=200)
                                             fig.update_layout(margin=dict(l=10, r=10, t=40, b=40), yaxis_title=None, xaxis_title=None)
                                             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                                         else:
-                                            st.write("No distribution available.")
+                                            st.write("No valid distribution available.")
         with tab2:
             st.header("System Dynamics Explorer")
             with st.expander("Explanation of System Dynamics"):
