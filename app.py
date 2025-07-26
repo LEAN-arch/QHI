@@ -21,7 +21,7 @@
 # - Removed hmmlearn dependency from requirements.txt.
 # - Fixed likelihood scores of 0 and missing number combinations by improving log loss robustness.
 # - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
-# - Corrected model_funcs loop, logging typos, and UI errors.
+# - Added logging for prob_of_true and draw_log_loss to diagnose zero likelihood scores.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -156,6 +156,7 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
             dist = {j: 1/max_nums[i] for j in range(1, max_nums[i] + 1)}
         total_prob = sum(dist.values())
         if total_prob == 0 or np.isnan(total_prob):
+            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{i+1}. Using uniform distribution.")
             dist = {j: 1/max_nums[i] for j in range(1, max_nums[i] + 1)}
         else:
             dist = {k: v/total_prob for k, v in dist.items()}
@@ -450,15 +451,18 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                             dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
                         total_prob = sum(dist.values())
                         if total_prob == 0 or np.isnan(total_prob):
+                            st.session_state.data_warnings.append(f"Zero or NaN total probability for Pos_{pos_idx+1} in {name} for draw {i}")
                             dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
                         else:
                             dist = {k: v/total_prob for k, v in dist.items()}
                         true_num = y_true[pos_idx]
                         prob_of_true = dist.get(true_num, 1e-6)
+                        st.session_state.data_warnings.append(f"Model {name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.6f}")
                         draw_log_loss -= np.log(max(prob_of_true, float(1e-10)))
                     draw_log_loss = min(draw_log_loss, 50.0)  # Cap to avoid overflow
                     total_log_loss += draw_log_loss
                     draw_count += 1
+                    st.session_state.data_warnings.append(f"Model {name}, Draw {i}: Log Loss={draw_log_loss:.3f}")
                 except Exception as e:
                     st.session_state.data_warnings.append(f"Error backtesting {name} for draw {i}: {e}")
                     continue
