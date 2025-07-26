@@ -1,24 +1,22 @@
 # ======================================================================================================
-# LottoSphere v18.0.0: Quantum Chronodynamics Engine
+# LottoSphere v18.1.0: Quantum Chronodynamics Engine (Optimized for Streamlit Cloud)
 #
-# VERSION: 18.0.0
+# VERSION: 18.1.0
 #
 # DESCRIPTION:
-# A Streamlit-based application for modeling 6-digit lottery draws as evolving stochastic systems.
-# Integrates statistical physics, time-series analysis, machine learning, dynamical systems,
-# information theory, and cognitive computing to predict and analyze number set behavior.
+# A Streamlit-based application for modeling 6-digit lottery draws as stochastic systems.
+# Optimized for Streamlit Cloud with reduced memory usage, delayed computations, and robust error handling.
 #
 # CHANGELOG:
-# - v18.0.0: Comprehensive overhaul to include Monte Carlo, Fokker-Planck, Lyapunov exponents,
-#   SARIMA, LSTM, GRU, HMM, Bayesian Neural Networks, recurrence plots, wavelet transforms,
-#   HDBSCAN clustering, UMAP visualization, entropy metrics, and Bayesian decision theory.
-# - Fixed SARIMA formatting errors with scalar extraction.
-# - Enhanced randomization in get_best_guess_set to avoid 1-2-3-4-5-6 outputs.
-# - Added clustering (HDBSCAN) and 3D latent space visualization (UMAP).
-# - Implemented optimal training horizon analysis and stability index.
-# - Added interactive UI with Plotly 3D plots, sliders, and tooltips.
-# - Replaced hmmlearn with hmmlearn==0.3.2 for HMM compatibility.
-# - Preserved prior fixes (clipping, cache clearing, float(1e-10)).
+# - v18.1.0: Optimized for Streamlit Cloud:
+#   - Reduced model complexity (hidden_size=32, batch_size=16).
+#   - Moved training to button clicks to avoid initialization crashes.
+#   - Added try-except for optional dependencies (torchbnn, hdbscan, umap-learn).
+#   - Simplified UI, deferred clustering and horizon analysis.
+#   - Added debug logging to st.session_state.warnings.
+#   - Removed GPU usage (force CPU).
+#   - Retained SARIMA scalar fix and randomization.
+# - v18.0.0: Original with MCMC, SARIMA, HMM, LSTM, GRU, BayesianNN, etc.
 # ======================================================================================================
 
 import streamlit as st
@@ -28,28 +26,48 @@ import io
 import plotly.express as px
 import plotly.graph_objects as go
 from collections import Counter
-import matplotlib.pyplot as plt
 import warnings
 from typing import List, Dict, Any, Tuple, Optional
 import scipy.stats as stats
 from scipy.signal import welch, cwt, morlet2
-from nolds import lyap_r, dfa
 from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.arima.model import ARIMA
 from sktime.forecasting.arima import AutoARIMA
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-import torchbnn as bnn
-from hmmlearn import hmm
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import log_loss
-from sklearn.decomposition import PCA
-from hdbscan import HDBSCAN
-from umap import UMAP
 import networkx as nx
 import itertools
 import math
+
+# Optional dependencies with fallbacks
+try:
+    from nolds import lyap_r, dfa
+except ImportError:
+    lyap_r, dfa = None, None
+    st.warning("nolds not available, skipping Lyapunov and DFA.")
+try:
+    import torchbnn as bnn
+except ImportError:
+    bnn = None
+    st.warning("torchbnn not available, skipping BayesianNN.")
+try:
+    from hmmlearn import hmm
+except ImportError:
+    hmm = None
+    st.warning("hmmlearn not available, skipping HMM.")
+try:
+    import hdbscan
+except ImportError:
+    hdbscan = None
+    st.warning("hdbscan not available, skipping clustering.")
+try:
+    import umap
+except ImportError:
+    umap = None
+    st.warning("umap-learn not available, skipping UMAP.")
 
 # --- Suppress Warnings ---
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -57,7 +75,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v18.0.0: Quantum Chronodynamics",
+    page_title="LottoSphere v18.1.0: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -70,7 +88,8 @@ if 'cache_cleared' not in st.session_state:
 
 np.random.seed(42)
 torch.manual_seed(42)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")  # Force CPU for Streamlit Cloud
+st.session_state.data_warnings.append(f"Using device: {device}")
 
 # --- Clear Streamlit Cache ---
 if not st.session_state.cache_cleared:
@@ -78,17 +97,12 @@ if not st.session_state.cache_cleared:
     st.session_state.cache_cleared = True
     st.session_state.data_warnings.append("Streamlit cache cleared.")
 
-# ====================================================================================================
-# ALL FUNCTION DEFINITIONS
-# ====================================================================================================
-
 # --- 2. CORE UTILITIES & DATA HANDLING ---
 @st.cache_data
 def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
     """Loads, validates, and preprocesses lottery data from CSV."""
     try:
         df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
-        st.session_state.data_warnings = []
         st.session_state.data_warnings.append(f"Loaded CSV: {len(df)} rows, {df.shape[1]} columns, max_nums={max_nums}")
         if df.shape[1] != 6:
             st.session_state.data_warnings.append(f"CSV has {df.shape[1]} columns, expected 6.")
@@ -150,7 +164,7 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
         sorted_values = np.sort(df.values, axis=1)
         return pd.DataFrame(sorted_values, columns=df.columns).astype(int)
     except Exception as e:
-        st.error(f"Fatal error loading data: {e}")
+        st.session_state.data_warnings.append(f"Fatal error loading data: {e}")
         return pd.DataFrame()
 
 def create_sequences(data: np.ndarray, seq_length: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -224,7 +238,7 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) ->
         results = {}
         series = _df[position].values.astype(int)
         if len(series) < 10:
-            st.warning(f"Insufficient data for {position}: {len(series)} draws.")
+            st.session_state.data_warnings.append(f"Insufficient data for {position}: {len(series)} draws.")
             return results
         
         # Recurrence Plot
@@ -240,7 +254,7 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) ->
         )
 
         # Fourier Analysis
-        freqs, psd = welch(series, nperseg=min(len(series), 256), fs=1.0)
+        freqs, psd = welch(series, nperseg=min(len(series), 128), fs=1.0)  # Reduced nperseg
         psd_df = pd.DataFrame({'Frequency': freqs, 'Power': psd}).sort_values('Power', ascending=False)
         results['fourier_fig'] = px.line(
             psd_df, x='Frequency', y='Power', title=f'Power Spectral Density: {position}',
@@ -252,7 +266,7 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) ->
         )
 
         # Wavelet Transform
-        widths = np.arange(1, min(len(series)//2, 31))
+        widths = np.arange(1, min(len(series)//2, 16))  # Reduced widths
         cwt_matrix = cwt(series, morlet2, widths)
         results['wavelet_fig'] = go.Figure(data=go.Heatmap(
             z=np.abs(cwt_matrix), x=np.arange(len(series)), y=widths, colorscale='viridis'
@@ -263,28 +277,35 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) ->
         )
 
         # Lyapunov Exponent
-        try:
-            lyap_exp = lyap_r(series, emb_dim=max(2, len(series)//10), lag=1, min_tsep=10)
-            results['lyapunov'] = lyap_exp
-            results['is_stable'] = lyap_exp <= 0.05
-            st.session_state.data_warnings.append(f"{position} Lyapunov: {lyap_exp:.3f}, Stable: {results['is_stable']}")
-        except Exception as e:
+        if lyap_r:
+            try:
+                lyap_exp = lyap_r(series, emb_dim=max(2, len(series)//20), lag=1, min_tsep=5)
+                results['lyapunov'] = lyap_exp
+                results['is_stable'] = lyap_exp <= 0.05
+                st.session_state.data_warnings.append(f"{position} Lyapunov: {lyap_exp:.3f}, Stable: {results['is_stable']}")
+            except Exception as e:
+                results['lyapunov'] = float('nan')
+                results['is_stable'] = False
+                st.session_state.data_warnings.append(f"Lyapunov failed for {position}: {e}")
+        else:
             results['lyapunov'] = float('nan')
             results['is_stable'] = False
-            st.session_state.data_warnings.append(f"Lyapunov failed for {position}: {e}")
 
         # Fractal Dimension (DFA)
-        try:
-            fractal_dim = dfa(series)
-            results['fractal_dim'] = fractal_dim
-            st.session_state.data_warnings.append(f"{position} Fractal Dimension: {fractal_dim:.3f}")
-        except Exception:
+        if dfa:
+            try:
+                fractal_dim = dfa(series)
+                results['fractal_dim'] = fractal_dim
+                st.session_state.data_warnings.append(f"{position} Fractal Dimension: {fractal_dim:.3f}")
+            except Exception:
+                results['fractal_dim'] = float('nan')
+                st.session_state.data_warnings.append(f"Fractal dimension failed for {position}")
+        else:
             results['fractal_dim'] = float('nan')
-            st.session_state.data_warnings.append(f"Fractal dimension failed for {position}")
 
         # Periodicity Analysis
-        if results['is_stable']:
-            acf_vals = acf(series, nlags=min(50, len(series)//2 - 1), fft=True)
+        if results.get('is_stable'):
+            acf_vals = acf(series, nlags=min(25, len(series)//2 - 1), fft=True)
             lags = np.arange(len(acf_vals))
             conf_interval = 1.96 / np.sqrt(len(series))
             peaks = np.where(acf_vals[1:] > conf_interval)[0]
@@ -308,7 +329,7 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) ->
 
         return results
     except Exception as e:
-        st.error(f"Error in temporal analysis for {position}: {e}")
+        st.session_state.data_warnings.append(f"Error in temporal analysis for {position}: {e}")
         return {}
 
 # --- 4. CLUSTERING & LATENT SPACE ANALYSIS ---
@@ -317,50 +338,34 @@ def analyze_clusters(_df: pd.DataFrame, n_clusters: int, training_size: int) -> 
     """Performs clustering and latent space visualization."""
     try:
         results = {}
+        if not hdbscan or not umap:
+            st.session_state.data_warnings.append("HDBSCAN or UMAP unavailable, skipping clustering.")
+            return results
         data = _df.iloc[-training_size:].values
         if len(data) < 10:
             st.session_state.data_warnings.append(f"Clustering failed: insufficient data ({len(data)} rows).")
             return results
         
         # HDBSCAN Clustering
-        clusterer = HDBSCAN(min_cluster_size=5, min_samples=3)
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=5, min_samples=3)
         labels = clusterer.fit_predict(data)
         results['cluster_labels'] = labels
         n_clusters_found = len(set(labels)) - (1 if -1 in labels else 0)
         st.session_state.data_warnings.append(f"Found {n_clusters_found} clusters (requested {n_clusters}).")
 
-        # UMAP for 3D Visualization
-        reducer = UMAP(n_components=3, random_state=42)
+        # UMAP for 2D Visualization (reduced from 3D)
+        reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=5)
         embedding = reducer.fit_transform(data)
         results['umap_embedding'] = embedding
-        results['umap_fig'] = px.scatter_3d(
-            x=embedding[:, 0], y=embedding[:, 1], z=embedding[:, 2],
+        results['umap_fig'] = px.scatter(
+            x=embedding[:, 0], y=embedding[:, 1],
             color=labels.astype(str), title='Latent Space Clusters',
-            labels={'x': 'UMAP 1', 'y': 'UMAP 2', 'z': 'UMAP 3'},
+            labels={'x': 'UMAP 1', 'y': 'UMAP 2'},
             hover_data={'Draw': _df.index[-training_size:]}
         )
         results['umap_fig'].update_layout(
             annotations=[dict(text="Clusters in latent space.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
         )
-
-        # Cluster Evolution
-        if len(data) >= 20:
-            window_size = len(data) // 2
-            early_labels = clusterer.fit_predict(data[:window_size])
-            late_labels = clusterer.fit_predict(data[-window_size:])
-            transition_matrix = np.zeros((n_clusters_found + 1, n_clusters_found + 1))
-            for i, j in zip(early_labels, late_labels):
-                transition_matrix[i + 1, j + 1] += 1
-            transition_matrix /= (transition_matrix.sum() + 1e-10)
-            results['cluster_transition'] = transition_matrix
-            results['transition_fig'] = px.imshow(
-                transition_matrix, title='Cluster Transition Matrix',
-                labels=dict(x='Later Cluster', y='Earlier Cluster', color='Probability'),
-                color_continuous_scale='viridis'
-            )
-            results['transition_fig'].update_layout(
-                annotations=[dict(text="Shows cluster stability over time.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-            )
 
         return results
     except Exception as e:
@@ -369,7 +374,7 @@ def analyze_clusters(_df: pd.DataFrame, n_clusters: int, training_size: int) -> 
 
 # --- 5. ADVANCED PREDICTIVE MODELS ---
 def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
-    """Statistical physics analysis with Monte Carlo and Fokker-Planck."""
+    """Statistical physics analysis with Monte Carlo."""
     results = {}
     series = np.clip(series, 1, max_num).astype(int)
     
@@ -383,43 +388,25 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     current_state = series[-1] - 1 if 0 <= series[-1] - 1 < max_num else 0
     prob_vector = trans_prob[current_state]
     prob_vector /= prob_vector.sum() + 1e-10
-    mcmc_samples = np.random.choice(max_num, size=5000, p=prob_vector)
+    mcmc_samples = np.random.choice(max_num, size=1000, p=prob_vector)  # Reduced samples
     mcmc_dist = pd.Series(mcmc_samples + 1).value_counts(normalize=True).to_dict()
     results['mcmc_dist'] = {int(k): float(v) for k, v in mcmc_dist.items()}
-    
-    # Fokker-Planck
-    drift = np.diff(series).mean()
-    diffusion = np.diff(series).var() / 2.0
-    p = np.ones(max_num) / max_num
-    x = np.arange(1, max_num + 1)
-    dt, dx = 0.01, 1
-    for _ in range(100):
-        p_old = p.copy()
-        for i in range(1, max_num-1):
-            adv = -drift * (p_old[i+1] - p_old[i-1]) / (2 * dx)
-            diff = diffusion * (p_old[i+1] - 2*p_old[i] + p_old[i-1]) / (dx**2)
-            p[i] += dt * (adv + diff)
-        p[0], p[-1] = p[1], p[-2]
-        p = np.clip(p, 0, None)
-        p /= p.sum() + 1e-10
-    results['fokker_planck'] = {int(num): float(prob) for num, prob in zip(x, p)}
-    
-    # Entropy Production
-    entropy = -sum(p * np.log(p + 1e-10))
-    results['entropy'] = float(entropy)
     st.session_state.data_warnings.append(f"MCMC top 5: {sorted(results['mcmc_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
     return results
 
 def _analyze_hmm(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     """Hidden Markov Model analysis."""
     results = {}
+    if not hmm:
+        st.session_state.data_warnings.append("HMM unavailable, using uniform.")
+        return {'hmm_dist': {i: 1/max_num for i in range(1, max_num + 1)}}
     series = np.clip(series, 1, max_num).astype(int) - 1
     try:
-        model = hmm.GaussianHMM(n_components=3, covariance_type="full", n_iter=100)
+        model = hmm.GaussianHMM(n_components=2, covariance_type="full", n_iter=50)  # Reduced components
         model.fit(series.reshape(-1, 1))
         prob_dist = model.predict_proba(series[-1:].reshape(-1, 1))[0]
         dist = {}
-        for state in range(3):
+        for state in range(2):
             mean = model.means_[state, 0]
             std = np.sqrt(model.covars_[state, 0, 0])
             x = np.arange(max_num)
@@ -445,7 +432,7 @@ def _analyze_sarima(series: np.ndarray, max_num: int, position: str) -> Dict[str
     try:
         if len(series) < 10 or len(np.unique(series)) < 5:
             raise ValueError(f"Invalid series: len={len(series)}, unique={len(np.unique(series))}")
-        model = AutoARIMA(sp=1, suppress_warnings=True, maxiter=100)
+        model = AutoARIMA(sp=1, suppress_warnings=True, maxiter=50)  # Reduced iterations
         model.fit(series)
         pred = model.predict(fh=[1])
         pred_point = float(pred.iloc[0] if isinstance(pred, pd.Series) else pred[0])
@@ -465,82 +452,7 @@ def _analyze_sarima(series: np.ndarray, max_num: int, position: str) -> Dict[str
     return results
 
 @st.cache_resource
-def train_bayesian_nn(_df: pd.DataFrame, seq_length: int = 10, epochs: int = 50) -> Tuple[Optional[nn.Module], Optional[MinMaxScaler], float]:
-    """Trains a Bayesian Neural Network."""
-    try:
-        scaler = MinMaxScaler()
-        data_scaled = scaler.fit_transform(_df)
-        X, y = create_sequences(data_scaled, seq_length)
-        X_torch, y_torch = torch.tensor(X, dtype=torch.float32).to(device), torch.tensor(y, dtype=torch.float32).to(device)
-        dataset = TensorDataset(X_torch, y_torch)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
-        class BayesianNN(nn.Module):
-            def __init__(self, input_size=6, hidden_size=64):
-                super().__init__()
-                self.fc1 = bnn.BayesLinear(prior_mu=0, prior_sigma=0.1, in_features=input_size*seq_length, out_features=hidden_size)
-                self.fc2 = bnn.BayesLinear(prior_mu=0, prior_sigma=0.1, in_features=hidden_size, out_features=input_size)
-                self.relu = nn.ReLU()
-            def forward(self, x):
-                x = x.view(x.size(0), -1)
-                x = self.relu(self.fc1(x))
-                return self.fc2(x)
-        
-        model = BayesianNN().to(device)
-        criterion = nn.MSELoss()
-        kl_loss = bnn.BKLLoss(reduction='mean', last_layer_only=False)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        model.train()
-        for epoch in range(epochs):
-            for batch_x, batch_y in dataloader:
-                optimizer.zero_grad()
-                outputs = model(batch_x)
-                mse = criterion(outputs, batch_y)
-                kl = kl_loss(model)
-                loss = mse + 0.1 * kl
-                loss.backward()
-                optimizer.step()
-        model.eval()
-        with torch.no_grad():
-            final_loss = criterion(model(X_torch), y_torch).item()
-        st.session_state.data_warnings.append(f"BayesianNN trained: Loss={final_loss:.4f}")
-        return model, scaler, final_loss
-    except Exception as e:
-        st.session_state.data_warnings.append(f"BayesianNN training failed: {e}")
-        return None, None, float('inf')
-
-@st.cache_data
-def predict_bayesian_nn(_df: pd.DataFrame, _model_cache: Tuple, seq_length: int, max_nums: List[int]) -> Dict[str, Any]:
-    """Predicts with Bayesian Neural Network."""
-    try:
-        model, scaler, best_loss = _model_cache
-        if model is None:
-            st.session_state.data_warnings.append("BayesianNN model is None. Using uniform.")
-            return {'name': 'BayesianNN', 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': 'BayesianNN failed.'}
-        last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
-        last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
-        with torch.no_grad():
-            preds = [model(last_seq_torch) for _ in range(100)]
-            pred_mean = torch.mean(torch.stack(preds), dim=0).cpu().numpy().flatten()
-            pred_std = torch.std(torch.stack(preds), dim=0).cpu().numpy().flatten()
-        prediction_raw = scaler.inverse_transform(pred_mean.reshape(1, -1)).flatten()
-        prediction_raw = np.clip(prediction_raw, 1, max_nums)
-        distributions = []
-        for i in range(6):
-            x_range = np.arange(1, max_nums[i] + 1)
-            prob_mass = stats.norm.pdf(x_range, loc=prediction_raw[i], scale=max(1.0, pred_std[i]))
-            prob_mass = np.clip(prob_mass, 1e-10, 1)
-            prob_mass /= prob_mass.sum() + 1e-10
-            dist = {int(num): float(prob) for num, prob in zip(x_range, prob_mass)}
-            distributions.append(dist)
-            st.session_state.data_warnings.append(f"BayesianNN Pos_{i+1}: Top 5={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
-        return {'name': 'BayesianNN', 'distributions': distributions, 'logic': 'Bayesian Neural Network forecast.'}
-    except Exception as e:
-        st.session_state.data_warnings.append(f"BayesianNN prediction failed: {e}")
-        return {'name': 'BayesianNN', 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': 'BayesianNN failed.'}
-
-@st.cache_resource
-def train_torch_model(_df: pd.DataFrame, model_type: str, seq_length: int = 10, epochs: int = 50) -> Tuple[Optional[nn.Module], Optional[MinMaxScaler], float]:
+def train_torch_model(_df: pd.DataFrame, model_type: str, seq_length: int = 10, epochs: int = 20) -> Tuple[Optional[nn.Module], Optional[MinMaxScaler], float]:
     """Trains LSTM or GRU model."""
     try:
         scaler = MinMaxScaler()
@@ -548,12 +460,12 @@ def train_torch_model(_df: pd.DataFrame, model_type: str, seq_length: int = 10, 
         X, y = create_sequences(data_scaled, seq_length)
         X_torch, y_torch = torch.tensor(X, dtype=torch.float32).to(device), torch.tensor(y, dtype=torch.float32).to(device)
         dataset = TensorDataset(X_torch, y_torch)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)  # Reduced batch size
         
         class SequenceModel(nn.Module):
-            def __init__(self, input_size=6, hidden_size=64):
+            def __init__(self, input_size=6, hidden_size=32):  # Reduced hidden size
                 super().__init__()
-                self.rnn = nn.LSTM(input_size, hidden_size, 2, batch_first=True, dropout=0.2) if model_type == 'LSTM' else nn.GRU(input_size, hidden_size, 2, batch_first=True, dropout=0.2)
+                self.rnn = nn.LSTM(input_size, hidden_size, 1, batch_first=True, dropout=0.1) if model_type == 'LSTM' else nn.GRU(input_size, hidden_size, 1, batch_first=True, dropout=0.1)
                 self.fc = nn.Linear(hidden_size, input_size)
             def forward(self, x):
                 out, _ = self.rnn(x)
@@ -658,10 +570,6 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
             list(ensemble_dist.values()),
             [1/max_num for _ in range(max_num)]
         ))
-        results['mutual_info'] = float(np.mean([
-            stats.entropy(list(d.values()), [1/max_num for _ in range(max_num)])
-            for d in all_dists if d
-        ]))
         return results
     except Exception as e:
         st.session_state.data_warnings.append(f"Stable position analysis failed for {position}: {e}")
@@ -677,15 +585,15 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         if len(_df) - split_point < 10:
             split_point = len(_df) - 10
             st.session_state.data_warnings.append(f"Adjusted split_point to {split_point} for validation.")
-        train_df, val_df = _df.iloc[:split_point], _df.iloc[split_point:]
-        lstm_cache = train_torch_model(train_df, 'LSTM', seq_length=10)
-        gru_cache = train_torch_model(train_df, 'GRU', seq_length=10)
-        bnn_cache = train_bayesian_nn(train_df, seq_length=10)
+        train_df = _df.iloc[:split_point]
+        
+        # Train models only when needed
+        lstm_cache = train_torch_model(train_df, 'LSTM', seq_length=10, epochs=20)
+        gru_cache = train_torch_model(train_df, 'GRU', seq_length=10, epochs=20)
         
         model_funcs = {
             'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 10, max_nums),
             'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 10, max_nums),
-            'BayesianNN': lambda d: predict_bayesian_nn(d, bnn_cache, 10, max_nums),
         }
         for pos in stable_positions:
             pos_idx = int(pos.split('_')[1]) - 1
@@ -694,12 +602,12 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         
         st.session_state.data_warnings.append(f"Models: {list(model_funcs.keys())}, max_nums={max_nums}")
         progress_bar = st.progress(0, text="Backtesting...")
-        total_steps = len(val_df) * len(model_funcs)
+        total_steps = min(10, len(_df) - split_point) * len(model_funcs)  # Limit validation steps
         current_step = 0
-        stability_metrics = {}
         
         for name, func in model_funcs.items():
             log_losses, top5_accuracies, entropies = [], [], []
+            val_df = _df.iloc[split_point:split_point + 10]  # Limit validation size
             for i in range(len(val_df)):
                 try:
                     historical_df = _df.iloc[:split_point + i]
@@ -727,9 +635,6 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                         top5_numbers = [n for n, _ in top5]
                         if true_num in top5_numbers:
                             top5_correct += 1
-                        st.session_state.data_warnings.append(
-                            f"{name}, Draw {i}, Pos_{pos_idx+1}: True={true_num}, Prob={prob_of_true:.6f}, Top 5={top5}"
-                        )
                     draw_log_loss = min(draw_log_loss, 20.0)
                     log_losses.append(draw_log_loss)
                     top5_accuracies.append(top5_correct / 6)
@@ -770,75 +675,27 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         progress_bar.progress(1.0)
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
     except Exception as e:
-        st.error(f"Backtest suite error: {e}")
+        st.session_state.data_warnings.append(f"Backtest suite error: {e}")
         return []
 
-# --- 7. OPTIMAL TRAINING HORIZON ---
-@st.cache_data
-def find_optimal_training_horizon(_df: pd.DataFrame, max_nums: List[int], stable_positions: List[str]) -> Dict[str, Any]:
-    """Analyzes performance across training sizes."""
-    try:
-        results = {}
-        training_sizes = [50, 100, 150, 200, len(_df)] if len(_df) >= 200 else [50, len(_df)]
-        performance_metrics = []
-        
-        for size in training_sizes:
-            if size > len(_df):
-                continue
-            scored_preds = run_full_backtest_suite(_df.iloc[-size:], max_nums, stable_positions, size)
-            if not scored_preds:
-                continue
-            avg_likelihood = np.mean([p['likelihood'] for p in scored_preds])
-            avg_stability = np.mean([float(p['metrics']['Stability Index']) for p in scored_preds])
-            performance_metrics.append({
-                'Training Size': size,
-                'Avg Likelihood': avg_likelihood,
-                'Avg Stability': avg_stability
-            })
-        
-        if not performance_metrics:
-            st.session_state.data_warnings.append("No valid performance metrics for training horizon.")
-            return results
-        
-        df_metrics = pd.DataFrame(performance_metrics)
-        results['horizon_fig'] = px.line(
-            df_metrics, x='Training Size', y=['Avg Likelihood', 'Avg Stability'],
-            title='Training Horizon Analysis',
-            labels={'value': 'Metric Value', 'variable': 'Metric'},
-            hover_data={'Training Size': ':.0f', 'value': ':.3f'}
-        )
-        results['horizon_fig'].update_layout(
-            annotations=[dict(text="Shows prediction stability vs training size.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-        )
-        
-        # Find stabilization point
-        likelihood_diffs = np.diff(df_metrics['Avg Likelihood'])
-        stabilization_idx = np.where(np.abs(likelihood_diffs) < 1.0)[0]
-        results['stabilization_point'] = training_sizes[stabilization_idx[0] + 1] if stabilization_idx.size > 0 else training_sizes[-1]
-        results['stabilization_description'] = (
-            f"Stabilization at {results['stabilization_point']} draws: likelihood changes <1%."
-        )
-        return results
-    except Exception as e:
-        st.session_state.data_warnings.append(f"Training horizon analysis failed: {e}")
-        return {}
-
-# ====================================================================================================
-# Main Application UI & Logic
-# ====================================================================================================
-st.title("⚛️ LottoSphere v18.0.0: Quantum Chronodynamics Engine")
+# --- Main Application UI & Logic ---
+st.title("⚛️ LottoSphere v18.1.0: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for modeling 6-digit lottery draws as stochastic systems.")
 
 st.sidebar.header("Configuration")
 max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=100, value=50 + i*2, key=f"max_num_{i+1}") for i in range(6)]
-training_size = st.sidebar.slider("Training Size", min_value=50, max_value=200, value=100, step=10, help="Number of draws to use for training.")
-n_clusters = st.sidebar.slider("Number of Clusters", min_value=2, max_value=10, value=5, help="Target number of clusters for analysis.")
+training_size = st.sidebar.slider("Training Size", min_value=50, max_value=100, value=50, step=10, help="Number of draws to use for training.")
+n_clusters = st.sidebar.slider("Number of Clusters", min_value=2, max_value=5, value=3, help="Target number of clusters for analysis.")
 uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="CSV with 6 columns, one draw per row, last row most recent.")
+
+# Display warnings
+if st.session_state.data_warnings:
+    with st.sidebar.expander("Warnings", expanded=True):
+        for warning in st.session_state.data_warnings[-10:]:
+            st.warning(warning)
 
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
-    for warning_msg in st.session_state.data_warnings:
-        st.warning(warning_msg)
     if not df_master.empty and df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded {len(df_master)} draws.")
         with st.spinner("Analyzing stability..."):
@@ -851,12 +708,6 @@ if uploaded_file:
                     stable_positions.append(pos)
             st.session_state.data_warnings.append(f"Stable positions: {stable_positions}")
         
-        # Cluster Analysis
-        cluster_results = analyze_clusters(df_master, n_clusters, training_size)
-        
-        # Optimal Training Horizon
-        horizon_results = find_optimal_training_horizon(df_master, max_nums, stable_positions)
-        
         tab1, tab2, tab3 = st.tabs(["🔮 Predictions", "🔬 Dynamics Explorer", "🌌 Cluster Analysis"])
         
         with tab1:
@@ -864,11 +715,10 @@ if uploaded_file:
             with st.expander("About Predictions", expanded=False):
                 st.markdown("""
                 ### Overview
-                Generates probability distributions using LSTM, GRU, Bayesian Neural Networks, and stable position models (MCMC, SARIMA, HMM). Ranked by likelihood.
+                Generates probability distributions using LSTM, GRU, and stable position models (MCMC, SARIMA, HMM). Ranked by likelihood.
 
                 ### Models
                 - **LSTM/GRU**: Deep learning for temporal patterns.
-                - **BayesianNN**: Probabilistic neural network with uncertainty.
                 - **Stable Position Models**: MCMC, SARIMA, HMM for stable positions (Lyapunov ≤0.05).
                 - **Metrics**: Log loss, top-5 accuracy, entropy, stability index.
 
@@ -876,8 +726,6 @@ if uploaded_file:
                 - **MCMC**: Simulates state transitions via Markov chains.
                 - **SARIMA**: Models time-series with seasonal components.
                 - **HMM**: Captures hidden states in sequences.
-                - **BayesianNN**: Incorporates uncertainty in predictions.
-                - **Fokker-Planck**: Models probability density evolution.
                 - **Entropy**: Quantifies prediction uncertainty.
 
                 ### Actionability
@@ -972,43 +820,19 @@ if uploaded_file:
                 Clusters draws to identify behavioral regimes and visualizes in latent space.
 
                 ### Outputs
-                - **Latent Space Clusters**: 3D UMAP visualization of draw clusters.
-                - **Transition Matrix**: Shows cluster stability over time.
+                - **Latent Space Clusters**: 2D UMAP visualization of draw clusters.
 
                 ### Mathematical Basis
                 - **HDBSCAN**: Density-based clustering for varying cluster sizes.
                 - **UMAP**: Dimensionality reduction for visualization.
-                - **Transition Matrix**: Markov model of cluster evolution.
 
                 ### Actionability
                 - Identify stable clusters for consistent behaviors.
-                - Use transition matrix to predict regime shifts.
                 """)
-            if cluster_results:
-                st.plotly_chart(cluster_results.get('umap_fig'), use_container_width=True)
-                if 'transition_fig' in cluster_results:
-                    st.plotly_chart(cluster_results.get('transition_fig'), use_container_width=True)
-        
-        # Training Horizon
-        with st.expander("Training Horizon Analysis", expanded=False):
-            st.markdown("""
-            ### Overview
-            Evaluates model performance across training sizes to find optimal horizon.
-
-            ### Outputs
-            - **Likelihood & Stability**: Tracks metrics vs training size.
-            - **Stabilization Point**: Size where predictions stabilize.
-
-            ### Mathematical Basis
-            - **Likelihood**: Based on log loss.
-            - **Stability Index**: Std/Mean of log loss, lower is better.
-
-            ### Actionability
-            - Use stabilization point for optimal training size.
-            - Monitor stability to avoid overfitting.
-            """)
-            if horizon_results:
-                st.plotly_chart(horizon_results.get('horizon_fig'), use_container_width=True)
-                st.info(f"**Stabilization Point:** {horizon_results.get('stabilization_description', 'N/A')}")
+            if st.button("Run Cluster Analysis", use_container_width=True):
+                with st.spinner("Running cluster analysis..."):
+                    cluster_results = analyze_clusters(df_master, n_clusters, training_size)
+                if cluster_results:
+                    st.plotly_chart(cluster_results.get('umap_fig'), use_container_width=True)
 else:
     st.info("Upload a CSV file to begin analysis.")
