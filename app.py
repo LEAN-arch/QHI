@@ -159,7 +159,6 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
 
         # Recurrence Plot
         recurrence_matrix = np.abs(np.subtract.outer(series, series))
-        # FIXED: Avoid in-place division on an integer array. Create a new float array instead.
         normalized_recurrence = recurrence_matrix / (recurrence_matrix.max() + 1e-10)
         results['recurrence_fig'] = px.imshow(normalized_recurrence, color_continuous_scale='viridis', title=f"Recurrence Plot ({position})")
 
@@ -177,16 +176,15 @@ def analyze_temporal_behavior(_df: pd.DataFrame, position: str = 'Pos_1') -> Dic
         try:
             lyap_exp = lyap_r(series, emb_dim=3, lag=1, min_tsep=len(series)//10)
             results['lyapunov'] = lyap_exp
-            results['is_stable'] = (lyap_exp <= 0.05) # Loosen threshold slightly
+            results['is_stable'] = (lyap_exp <= 0.05)
         except Exception:
             results['lyapunov'] = -1
-            results['is_stable'] = True # Assume stable if calculation fails
+            results['is_stable'] = True
 
         # Periodicity Analysis for stable positions
         if results['is_stable']:
             acf_vals = acf(series, nlags=min(50, len(series)//2 - 1), fft=True)
             lags = np.arange(len(acf_vals))
-            # Find peaks above confidence interval
             conf_interval = 1.96 / np.sqrt(len(series))
             significant_peaks_indices = np.where(acf_vals[1:] > conf_interval)[0]
             if significant_peaks_indices.size > 0:
@@ -216,20 +214,25 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     # MCMC
     counts = np.zeros((max_num, max_num))
     for i in range(len(series)-1):
-        # Ensure indices are within bounds
+        # FIXED: Add boundary checks to prevent IndexError
         from_idx, to_idx = series[i]-1, series[i+1]-1
         if 0 <= from_idx < max_num and 0 <= to_idx < max_num:
             counts[from_idx, to_idx] += 1
             
     trans_prob = (counts + 1e-10) / (counts.sum(axis=1, keepdims=True) + 1e-9)
     current_state = series[-1] - 1
+    # Ensure current_state is valid before using it
+    if not (0 <= current_state < max_num):
+        # Handle edge case where last number is out of expected range
+        current_state = np.random.randint(0, max_num)
+        
     mcmc_samples = [np.random.choice(max_num, p=trans_prob[current_state]) for _ in range(2000)]
     mcmc_dist = pd.Series(c + 1 for c in mcmc_samples).value_counts(normalize=True).sort_index()
     results['mcmc_fig'] = px.bar(x=mcmc_dist.index, y=mcmc_dist.values, title="MCMC Number Distribution")
     results['mcmc_pred'] = int(mcmc_dist.idxmax())
     results['trans_prob'] = trans_prob
 
-    # Fokker-Planck (Corrected FTCS scheme)
+    # Fokker-Planck
     drift = np.diff(series).mean()
     diffusion = np.diff(series).var() / 2.0
     p = np.ones(max_num) / max_num
@@ -241,7 +244,6 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
             advective_term = -drift * (p_old[i+1] - p_old[i-1]) / (2 * dx)
             diffusive_term = diffusion * (p_old[i+1] - 2*p_old[i] + p_old[i-1]) / (dx**2)
             p[i] += dt * (advective_term + diffusive_term)
-        # Reflecting boundary conditions
         p[0] = p[1]; p[-1] = p[-2]
         p = np.clip(p, 0, None)
         p /= p.sum()
@@ -268,7 +270,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, seq_length: int = 3) ->
     bnn_pred = int(np.clip(np.round(scaler.inverse_transform(bnn_pred_scaled.reshape(-1, 1)).item()), 1, max_num))
     results['bnn_pred'] = bnn_pred
 
-    # HMM (Corrected logic)
+    # HMM
     hmm_series = (series - 1).reshape(-1, 1)
     hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
     hmm.fit(hmm_series)
@@ -322,7 +324,7 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
 # --- 5. ADVANCED PREDICTIVE MODELS ---
 @st.cache_resource
 def train_torch_model(_df: pd.DataFrame, model_type: str = 'LSTM', seq_length: int = 3, epochs: int = 100) -> Tuple[Optional[nn.Module], Optional[MinMaxScaler], float]:
-    """Trains a PyTorch sequence model (LSTM, GRU, or Transformer)."""
+    """Trains a PyTorch sequence model (LSTM, GRU)."""
     try:
         scaler = MinMaxScaler()
         data_scaled = scaler.fit_transform(_df)
@@ -333,13 +335,13 @@ def train_torch_model(_df: pd.DataFrame, model_type: str = 'LSTM', seq_length: i
         dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
         class SequenceModel(nn.Module):
-            def __init__(self):
+            def __init__(self, input_size=6, hidden_size=64):
                 super().__init__()
                 if model_type == 'LSTM':
-                    self.rnn = nn.LSTM(input_size=6, hidden_size=64, num_layers=2, batch_first=True, dropout=0.1)
+                    self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=2, batch_first=True, dropout=0.1)
                 elif model_type == 'GRU':
-                    self.rnn = nn.GRU(input_size=6, hidden_size=64, num_layers=2, batch_first=True, dropout=0.1)
-                self.fc = nn.Linear(64, 6)
+                    self.rnn = nn.GRU(input_size=input_size, hidden_size=hidden_size, num_layers=2, batch_first=True, dropout=0.1)
+                self.fc = nn.Linear(hidden_size, input_size)
             def forward(self, x):
                 out, _ = self.rnn(x)
                 return self.fc(out[:, -1, :])
@@ -389,10 +391,10 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
         seen = set()
         for i, p_val in enumerate(clipped_preds):
             candidate = p_val
-            # If candidate is taken, find a new one
             while candidate in seen:
-                # Try a perturbed version first, then random
-                candidate = (candidate + 1) if (candidate + 1) <= max_nums[i] and (candidate + 1) not in seen else np.random.randint(1, max_nums[i] + 1)
+                candidate = np.random.randint(1, max_nums[i] + 1)
+                if candidate not in seen:
+                    break
             final_preds.append(candidate)
             seen.add(candidate)
         
@@ -426,7 +428,6 @@ def analyze_hilbert_embedding(_df: pd.DataFrame, max_nums: List[int]) -> Dict[st
         
         predicted_vector = (np.abs(mean_vector.iloc[-1]) + amp_velocity) * np.exp(1j * (np.angle(mean_vector.iloc[-1]) + phase_velocity))
         
-        # Greedily select numbers to best match the predicted vector
         selected, seen = [], set()
         current_sum_vec = 0
         for pos_idx in range(6):
@@ -434,7 +435,6 @@ def analyze_hilbert_embedding(_df: pd.DataFrame, max_nums: List[int]) -> Dict[st
             potential_vectors = (current_sum_vec + to_complex(potential_nums, pos_idx)) / (len(selected) + 1)
             distances = np.abs(potential_vectors - predicted_vector)
             
-            # Find best number not already seen
             for num_idx in np.argsort(distances):
                 best_num = potential_nums[num_idx]
                 if best_num not in seen:
@@ -469,30 +469,25 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 
         train_df, val_df = _df.iloc[:split_point], _df.iloc[split_point:]
         
-        # Train core models once on the initial training set
         lstm_cache = train_torch_model(train_df, 'LSTM')
         gru_cache = train_torch_model(train_df, 'GRU')
 
-        # Define model functions
         model_funcs = {
             'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 3, max_nums),
             'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 3, max_nums),
             'Hilbert Embedding': lambda d: analyze_hilbert_embedding(d, max_nums),
         }
 
-        # Add stable position models
         for pos in stable_positions:
             pos_idx = int(pos.split('_')[1]) - 1
             stable_results = analyze_stable_position_dynamics(train_df, pos, max_nums[pos_idx])
             
             def create_stable_pred_func(res, p_idx):
                 def stable_pred_func(d):
-                    # Combine model's single prediction with a stable baseline (last draw)
                     base_pred = d.iloc[-1].values.copy()
-                    pred_val = res.get('fuzzy_pred', d.iloc[-1, p_idx]) # Use fuzzy ensemble prediction
+                    pred_val = res.get('fuzzy_pred', d.iloc[-1, p_idx])
                     base_pred[p_idx] = pred_val
                     
-                    # Ensure uniqueness and sort for evaluation
                     final_preds, seen = [], set()
                     for val in base_pred:
                         candidate = val
@@ -561,14 +556,12 @@ uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["c
 if uploaded_file:
     df_master = load_data(uploaded_file, max_nums)
     
-    # Display any data validation warnings
     for warning_msg in st.session_state.data_warnings:
         st.warning(warning_msg)
 
     if not df_master.empty and df_master.shape[1] == 6:
         st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
         
-        # Identify stable positions for specialized analysis
         with st.spinner("Analyzing system stability..."):
             stable_positions = [pos for pos in df_master.columns if analyze_temporal_behavior(df_master, pos).get('is_stable', False)]
         if stable_positions:
