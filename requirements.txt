@@ -4,7 +4,7 @@ numpy==1.26.4
 plotly
 matplotlib
 scikit-learn
-scipy
+scipy<1.16
 nolds
 statsmodels
 tensorflow-probability[tf]
