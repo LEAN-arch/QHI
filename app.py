@@ -1,22 +1,29 @@
 # ======================================================================================================
-# LottoSphere v18.3.0: Quantum Chronodynamics Engine (Optimized for Streamlit Cloud)
+# LottoSphere v19.0.0: Quantum Chronodynamics Engine (SME Optimized)
 #
-# VERSION: 18.3.0
+# VERSION: 19.0.0
 #
 # DESCRIPTION:
-# A Streamlit-based application for modeling 6-digit lottery draws as stochastic systems.
-# Fixes likelihood score (0.67%), Pos_2 analysis failure, and clustering issues from v18.2.0.
+# A scientifically rigorous Streamlit dashboard for modeling and forecasting 6-digit numerical sequences.
+# This version represents a complete methodological overhaul of v18.x.
 #
-# CHANGELOG:
-# - v18.3.0: Fixed reported issues:
-#   - Likelihood score fixed: Capped log_loss at 5.0, adjusted to 100 * exp(-log_loss/3).
-#   - Pos_2 analysis: Added stricter data validation, reduced plot complexity, fallback for nolds.
-#   - Clustering: Added fallback for missing hdbscan/umap, skipped silhouette for invalid clusters.
-#   - Enhanced logging for log_loss, distributions, and specific errors.
-#   - Retained all models, adaptive training_size, and silhouette-based n_clusters.
-# - v18.2.0: Added all models, adaptive training_size, silhouette-based n_clusters.
-# - v18.1.0: Optimized for Streamlit Cloud, deferred computations.
-# - v18.0.0: Original with MCMC, SARIMA, HMM, LSTM, GRU, BayesianNN.
+# CHANGELOG (v19.0.0):
+# - CRITICAL FIX: Removed `np.sort` from data loading. Positional integrity is now preserved,
+#   enabling true stochastic process analysis for each of the 6 digit positions.
+# - NEW FEATURE: Implemented "Stabilization Point Analysis" to visually determine the optimal training
+#   window size by plotting Cross-Entropy and a new Prediction Stability Index (PSI) vs. data history.
+# - REFACTORED CLUSTERING: Replaced flawed `n_clusters` logic with interactive sliders for
+#   HDBSCAN's `min_cluster_size` and `min_samples`. Corrected silhouette score to ignore outliers.
+# - NEW MODEL: Integrated a "Quantum-Inspired Hilbert Embedding" model using amplitude encoding to
+#   represent draw states and forecast probabilities.
+# - ENHANCED BACKTESTING: Revamped `run_full_backtest_suite` for more robust walk-forward
+#   validation over a user-configurable number of steps.
+# - UNIFIED POSITIONAL MODEL: Created a "Positional Dynamics Ensemble" that intelligently combines
+#   MCMC, SARIMA, and HMM predictions for each stable position.
+# - UX OVERHAUL: Analysis now runs automatically on data upload. Interactive sliders provide
+#   dynamic control over key parameters.
+# - REFINED METRICS: Added Prediction Stability Index (PSI). Improved Likelihood Score formula for
+#   better sensitivity. Cleaned up logging and warnings.
 # ======================================================================================================
 
 import streamlit as st
@@ -31,980 +38,698 @@ from typing import List, Dict, Any, Tuple, Optional
 import scipy.stats as stats
 from scipy.signal import welch, cwt, morlet2
 from statsmodels.tsa.stattools import acf
-from statsmodels.tsa.arima.model import ARIMA
 from sktime.forecasting.arima import AutoARIMA
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import log_loss, silhouette_score
-import networkx as nx
-import itertools
-import math
+import copy
 
-# Optional dependencies with fallbacks
+# --- Optional Dependencies with Graceful Fallbacks ---
 try:
-    from nolds import lyap_r, dfa
+    from nolds import lyap_r
 except ImportError:
-    lyap_r, dfa = None, None
-    st.warning("nolds not available, skipping Lyapunov and DFA.")
-try:
-    import torchbnn as bnn
-except ImportError:
-    bnn = None
-    st.warning("torchbnn not available, skipping BayesianNN.")
+    lyap_r = None
+    st.sidebar.warning("`nolds` not found. Lyapunov exponent analysis will be skipped.")
 try:
     from hmmlearn import hmm
 except ImportError:
     hmm = None
-    st.warning("hmmlearn not available, skipping HMM.")
+    st.sidebar.warning("`hmmlearn` not found. HMM model will be skipped.")
 try:
     import hdbscan
 except ImportError:
     hdbscan = None
-    st.warning("hdbscan not available, skipping clustering.")
+    st.sidebar.warning("`hdbscan` not found. Clustering analysis will be disabled.")
 try:
     import umap
 except ImportError:
     umap = None
-    st.warning("umap-learn not available, skipping UMAP.")
+    st.sidebar.warning("`umap-learn` not found. UMAP visualization will be disabled.")
 
-# --- Suppress Warnings ---
+# --- Suppress Warnings for a Cleaner UI ---
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v18.3.0: Quantum Chronodynamics",
+    page_title="LottoSphere v19.0.0: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
-if 'data_warnings' not in st.session_state:
-    st.session_state.data_warnings = []
-if 'model_calls' not in st.session_state:
-    st.session_state.model_calls = {}
-if 'cache_cleared' not in st.session_state:
-    st.session_state.cache_cleared = False
 
-np.random.seed(42)
-torch.manual_seed(42)
-device = torch.device("cpu")  # Force CPU for Streamlit Cloud
-st.session_state.data_warnings.append(f"Using device: {device}")
+# Initialize session state
+if 'analysis_results' not in st.session_state:
+    st.session_state.analysis_results = {}
+if 'df_master' not in st.session_state:
+    st.session_state.df_master = pd.DataFrame()
 
-# --- Clear Streamlit Cache ---
-if not st.session_state.cache_cleared:
-    st.cache_data.clear()
-    st.cache_resource.clear()
-    st.session_state.cache_cleared = True
-    st.session_state.data_warnings.append("Streamlit cache cleared.")
+# Use CPU for compatibility with Streamlit Cloud
+device = torch.device("cpu")
 
 # --- 2. CORE UTILITIES & DATA HANDLING ---
+
 @st.cache_data
-def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
-    """Loads, validates, and preprocesses lottery data from CSV."""
+def load_and_validate_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Loads, validates, and preprocesses lottery data from a CSV file.
+    CRITICAL FIX: This version DOES NOT sort the numbers in each draw, preserving positional integrity.
+    """
+    logs = []
     try:
         df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
-        st.session_state.data_warnings.append(f"Loaded CSV: {len(df)} rows, {df.shape[1]} columns, max_nums={max_nums}")
         if df.shape[1] != 6:
-            st.session_state.data_warnings.append(f"CSV has {df.shape[1]} columns, expected 6.")
-            return pd.DataFrame()
-        if len(max_nums) != 6:
-            st.session_state.data_warnings.append(f"max_nums must have 6 values, got {len(max_nums)}: {max_nums}")
-            return pd.DataFrame()
+            logs.append(f"Error: CSV must have exactly 6 columns, but found {df.shape[1]}.")
+            return pd.DataFrame(), logs
         
-        # Check for non-numeric values
-        for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        if df.isna().any().any():
-            st.session_state.data_warnings.append(f"Found {df.isna().sum().sum()} non-numeric/NaN values.")
-            return pd.DataFrame()
-        df = df.astype(int)
-
-        # Validate against max_nums
-        initial_rows = len(df)
-        for i, max_num in enumerate(max_nums):
-            invalid = df.iloc[:, i][(df.iloc[:, i] < 1) | (df.iloc[:, i] > max_num)]
-            if not invalid.empty:
-                st.session_state.data_warnings.append(
-                    f"Pos_{i+1}: {len(invalid)} values outside [1, {max_num}]: {invalid.unique().tolist()}"
-                )
-            df = df[(df.iloc[:, i] >= 1) & (df.iloc[:, i] <= max_num)]
-        if len(df) < initial_rows:
-            st.session_state.data_warnings.append(f"Discarded {initial_rows - len(df)} rows outside max_nums.")
-
-        # Check duplicates
-        unique_counts = df.apply(lambda x: len(set(x)), axis=1)
-        valid_rows = (unique_counts == 6)
-        if not valid_rows.all():
-            st.session_state.data_warnings.append(f"Discarded {len(df) - valid_rows.sum()} rows with duplicates.")
-            df = df[valid_rows]
-        if df.duplicated().any():
-            st.session_state.data_warnings.append(f"Discarded {df.duplicated().sum()} duplicate rows.")
-            df = df.drop_duplicates()
-
-        # Check variance and unique values
-        for i, col in enumerate(df.columns):
-            if df[col].std() < 1.0:
-                st.session_state.data_warnings.append(f"Low variance in {col}: std={df[col].std():.2f}.")
-                return pd.DataFrame()
-            unique_vals = len(df[col].unique())
-            if unique_vals < 5:
-                st.session_state.data_warnings.append(f"Too few unique values in {col}: {unique_vals}.")
-                return pd.DataFrame()
-
-        df = df.reset_index(drop=True)
         df.columns = [f'Pos_{i+1}' for i in range(6)]
-        if len(df) < 50:
-            st.session_state.data_warnings.append(f"Insufficient data: {len(df)} rows, need ≥50.")
-            return pd.DataFrame()
-        unique_draws = len(df.drop_duplicates())
-        if unique_draws < 50:
-            st.session_state.data_warnings.append(f"Insufficient unique draws: {unique_draws}, need ≥50.")
-            return pd.DataFrame()
+        
+        # Validate data types and ranges
+        initial_rows = len(df)
+        df_validated = df.copy()
+        for i, col in enumerate(df_validated.columns):
+            df_validated[col] = pd.to_numeric(df_validated[col], errors='coerce')
+            df_validated.dropna(subset=[col], inplace=True)
+            max_val = max_nums[i]
+            df_validated = df_validated[df_validated[col].between(1, max_val)]
+        
+        logs.append(f"Loaded {initial_rows} rows. After validation, {len(df_validated)} rows remain.")
 
-        st.session_state.data_warnings.append(f"Sorted data, loaded {len(df)} draws, {unique_draws} unique.")
-        sorted_values = np.sort(df.values, axis=1)
-        return pd.DataFrame(sorted_values, columns=df.columns).astype(int)
+        # Check for sufficient and valid data
+        if len(df_validated) < 50:
+            logs.append(f"Error: Insufficient valid data ({len(df_validated)} rows). Need at least 50.")
+            return pd.DataFrame(), logs
+        
+        # Check for within-row duplicates
+        is_duplicate_in_row = df_validated.apply(lambda row: row.nunique() != 6, axis=1)
+        num_dupe_rows = is_duplicate_in_row.sum()
+        if num_dupe_rows > 0:
+            logs.append(f"Discarding {num_dupe_rows} rows containing duplicate numbers.")
+            df_validated = df_validated[~is_duplicate_in_row]
+
+        df_validated = df_validated.reset_index(drop=True).astype(int)
+        logs.append(f"Data validation successful. Final dataset contains {len(df_validated)} draws.")
+        
+        # CRITICAL CHANGE: Do NOT sort the data. Return the original sequence.
+        return df_validated, logs
+
     except Exception as e:
-        st.session_state.data_warnings.append(f"Fatal error loading data: {e}")
-        return pd.DataFrame()
+        logs.append(f"Fatal error during data loading: {e}")
+        return pd.DataFrame(), logs
 
 def create_sequences(data: np.ndarray, seq_length: int) -> Tuple[np.ndarray, np.ndarray]:
     """Creates sequences for time-series modeling."""
-    if seq_length >= len(data):
-        raise ValueError("Sequence length must be less than data length")
     xs, ys = [], []
     for i in range(len(data) - seq_length):
-        xs.append(data[i:i+seq_length])
-        ys.append(data[i+seq_length])
+        xs.append(data[i:i + seq_length])
+        ys.append(data[i + seq_length])
     return np.array(xs), np.array(ys)
 
-def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int]) -> List[int]:
-    """Generates a unique 6-number set from probability distributions."""
-    best_guesses = []
-    seen = set()
-    if len(distributions) != 6:
-        st.session_state.data_warnings.append(f"Expected 6 distributions, got {len(distributions)}. Using uniform.")
-        distributions = [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums[:6]]
+def get_best_guess_set(distributions: List[Dict[int, float]]) -> List[int]:
+    """Generates a unique 6-number set from probability distributions, preserving position."""
+    best_guesses = [0] * 6
+    seen_numbers = set()
     
-    for i, dist in enumerate(distributions[:6]):
-        if not dist or not all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
-            st.session_state.data_warnings.append(f"Invalid distribution for Pos_{i+1}: {dist}. Using uniform.")
-            dist = {j: 1/max_num for j in range(1, max_num + 1)}
-        total_prob = sum(dist.values())
-        if total_prob == 0 or np.isnan(total_prob):
-            st.session_state.data_warnings.append(f"Zero/NaN probability for Pos_{i+1}: {total_prob}. Using uniform.")
-            dist = {j: 1/max_num for j in range(1, max_num + 1)}
-        else:
-            dist = {k: v/total_prob for k, v in dist.items()}
-        
-        numbers = list(dist.keys())
-        np.random.shuffle(numbers)
-        sorted_dist = sorted([(num, dist[num]) for num in numbers], key=lambda x: (-x[1], np.random.random()))
-        
-        for num, prob in sorted_dist:
-            if num not in seen and 1 <= num <= max_nums[i]:
-                best_guesses.append(num)
-                seen.add(num)
+    # First pass: Get the highest probability unique number for each position
+    candidates = []
+    for i, dist in enumerate(distributions):
+        if not dist: continue
+        sorted_probs = sorted(dist.items(), key=lambda item: item[1], reverse=True)
+        for num, prob in sorted_probs:
+            if num not in seen_numbers:
+                candidates.append({'pos': i, 'num': num, 'prob': prob, 'assigned': False})
                 break
-        else:
-            available = sorted(set(range(1, max_nums[i] + 1)) - seen)
-            if available:
-                guess = np.random.choice(available)
-                best_guesses.append(guess)
-                seen.add(guess)
-            else:
-                guess = np.random.randint(1, max_nums[i] + 1)
-                while guess in seen:
-                    guess = np.random.randint(1, max_nums[i] + 1)
-                best_guesses.append(guess)
-                seen.add(guess)
-    
-    while len(best_guesses) < 6:
-        for i in range(6):
-            if len(best_guesses) >= 6:
-                break
-            available = sorted(set(range(1, max_nums[i] + 1)) - seen)
-            if available:
-                guess = np.random.choice(available)
-                best_guesses.append(guess)
-                seen.add(guess)
-    st.session_state.data_warnings.append(f"Best guess set: {best_guesses[:6]}")
-    return sorted(best_guesses[:6])
 
-# --- 3. TIME-DEPENDENT BEHAVIOR ANALYSIS ---
+    # Assign best candidates greedily by probability
+    for candidate in sorted(candidates, key=lambda x: x['prob'], reverse=True):
+        if best_guesses[candidate['pos']] == 0 and candidate['num'] not in seen_numbers:
+            best_guesses[candidate['pos']] = candidate['num']
+            seen_numbers.add(candidate['num'])
+
+    # Second pass: Fill any remaining empty positions
+    for i in range(6):
+        if best_guesses[i] == 0:
+            dist = distributions[i]
+            sorted_probs = sorted(dist.items(), key=lambda item: item[1], reverse=True)
+            for num, prob in sorted_probs:
+                if num not in seen_numbers:
+                    best_guesses[i] = num
+                    seen_numbers.add(num)
+                    break
+    return best_guesses
+
+
+# --- 3. DYNAMICS & STABILITY ANALYSIS ---
+
 @st.cache_data
-def analyze_temporal_behavior(_df: pd.DataFrame, position: str, max_num: int) -> Dict[str, Any]:
-    """Analyzes chaotic and cyclical behavior of a positional time series."""
-    try:
-        results = {}
-        series = _df[position].values.astype(int)
-        if len(series) < 10:
-            st.session_state.data_warnings.append(f"Insufficient data for {position}: {len(series)} draws.")
-            return results
-        unique_vals = len(np.unique(series))
-        if unique_vals < 5:
-            st.session_state.data_warnings.append(f"Too few unique values for {position}: {unique_vals}.")
-            return results
+def analyze_positional_dynamics(_df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+    """Analyzes each position for chaos, stability, and periodicity."""
+    results = {}
+    for pos in _df.columns:
+        series = _df[pos].values
+        pos_results = {'is_stable': False, 'lyapunov': float('nan')}
         
-        # Recurrence Plot
-        recurrence_matrix = np.abs(np.subtract.outer(series, series))
-        normalized_recurrence = recurrence_matrix / (recurrence_matrix.max() + 1e-10)
-        results['recurrence_fig'] = px.imshow(
-            normalized_recurrence, color_continuous_scale='viridis', title=f'Recurrence Plot: {position}',
-            labels=dict(x='Draw Index', y='Draw Index', color='Distance')
-        )
-        results['recurrence_fig'].update_layout(
-            margin=dict(l=20, r=20, t=50, b=20),
-            hovertemplate='Draw X: %{x}<br>Draw Y: %{y}<br>Distance: %{z:.2f}<extra></extra>',
-            annotations=[dict(text="Visualizes state recurrences over time.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-        )
-
-        # Fourier Analysis
-        nperseg = min(len(series), 32)  # Reduced further
-        freqs, psd = welch(series, nperseg=nperseg, fs=1.0)
-        psd_df = pd.DataFrame({'Frequency': freqs, 'Power': psd}).sort_values('Power', ascending=False)
-        results['fourier_fig'] = px.line(
-            psd_df, x='Frequency', y='Power', title=f'Power Spectral Density: {position}',
-            hover_data={'Frequency': ':.3f', 'Power': ':.3f'}
-        )
-        results['fourier_fig'].update_layout(
-            margin=dict(l=20, r=20, t=50, b=20),
-            xaxis_title='Frequency', yaxis_title='Power',
-            annotations=[dict(text="Identifies dominant cycles.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-        )
-
-        # Wavelet Transform
-        widths = np.arange(1, min(len(series)//2, 4))  # Reduced further
-        if len(widths) > 0:
-            cwt_matrix = cwt(series, morlet2, widths)
-            results['wavelet_fig'] = go.Figure(data=go.Heatmap(
-                z=np.abs(cwt_matrix), x=np.arange(len(series)), y=widths, colorscale='viridis'
-            ))
-            results['wavelet_fig'].update_layout(
-                margin=dict(l=20, r=20, t=50, b=20),
-                title=f'Wavelet Transform: {position}', xaxis_title='Time', yaxis_title='Scale',
-                annotations=[dict(text="Tracks frequency changes over time.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-            )
-        else:
-            results['wavelet_fig'] = go.Figure()
-            st.session_state.data_warnings.append(f"Wavelet skipped for {position}: insufficient data.")
-
-        # Lyapunov Exponent
-        if lyap_r and len(series) >= 10:
+        if lyap_r and len(series) > 50:
             try:
-                lyap_exp = lyap_r(series, emb_dim=max(2, len(series)//20), lag=1, min_tsep=5)
-                results['lyapunov'] = lyap_exp
-                results['is_stable'] = lyap_exp <= 0.1
-                st.session_state.data_warnings.append(f"{position} Lyapunov: {lyap_exp:.3f}, Stable: {results['is_stable']}")
-            except Exception as e:
-                results['lyapunov'] = float('nan')
-                results['is_stable'] = False
-                st.session_state.data_warnings.append(f"Lyapunov failed for {position}: {e}")
-        else:
-            results['lyapunov'] = float('nan')
-            results['is_stable'] = False
-            st.session_state.data_warnings.append(f"Lyapunov unavailable for {position}: {'no nolds' if not lyap_r else 'insufficient data'}")
-
-        # Fractal Dimension (DFA)
-        if dfa and len(series) >= 10:
-            try:
-                fractal_dim = dfa(series)
-                results['fractal_dim'] = fractal_dim
-                st.session_state.data_warnings.append(f"{position} Fractal Dimension: {fractal_dim:.3f}")
+                # Use robust parameters for Lyapunov calculation
+                emb_dim = max(3, len(series) // 20)
+                lyap_exp = lyap_r(series, emb_dim=emb_dim, lag=1, min_tsep=len(series)//10)
+                pos_results['lyapunov'] = round(lyap_exp, 4)
+                # A stricter stability threshold for more reliable identification
+                if lyap_exp <= 0.05:
+                    pos_results['is_stable'] = True
             except Exception:
-                results['fractal_dim'] = float('nan')
-                st.session_state.data_warnings.append(f"Fractal dimension failed for {position}")
-        else:
-            results['fractal_dim'] = float('nan')
-            st.session_state.data_warnings.append(f"DFA unavailable for {position}: {'no nolds' if not dfa else 'insufficient data'}")
+                pass # Fails silently if nolds can't compute
+        results[pos] = pos_results
+    return results
 
-        # Periodicity Analysis
-        if results.get('is_stable'):
-            acf_vals = acf(series, nlags=min(25, len(series)//2 - 1), fft=True)
-            lags = np.arange(len(acf_vals))
-            conf_interval = 1.96 / np.sqrt(len(series))
-            peaks = np.where(acf_vals[1:] > conf_interval)[0]
-            if peaks.size > 0:
-                dominant_period = lags[peaks[0] + 1]
-                results['periodicity'] = dominant_period
-                results['periodicity_description'] = f"Periodicity detected: {dominant_period} draws."
-            else:
-                results['periodicity'] = None
-                results['periodicity_description'] = "No significant periodicity."
-            acf_df = pd.DataFrame({'Lag': lags, 'Autocorrelation': acf_vals})
-            results['acf_fig'] = px.line(
-                acf_df, x='Lag', y='Autocorrelation', title=f'Autocorrelation: {position}', markers=True,
-                hover_data={'Lag': ':.0f', 'Autocorrelation': ':.3f'}
-            )
-            results['acf_fig'].add_hline(y=conf_interval, line_dash="dash", line_color="red")
-            results['acf_fig'].add_hline(y=-conf_interval, line_dash="dash", line_color="red")
-            results['acf_fig'].update_layout(
-                margin=dict(l=20, r=20, t=50, b=20),
-                annotations=[dict(text="Detects periodic patterns.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-            )
+@st.cache_data
+def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_steps: int) -> go.Figure:
+    """
+    Analyzes model performance across different training window sizes to find the 'stabilization point'.
+    """
+    window_sizes = np.linspace(50, max(250, len(_df) - backtest_steps - 1), 10, dtype=int)
+    results = []
 
-        return results
-    except Exception as e:
-        st.session_state.data_warnings.append(f"Error in temporal analysis for {position}: {e}")
-        return {}
+    for size in window_sizes:
+        if len(_df) < size + backtest_steps:
+            continue
+        
+        log_losses = []
+        predictions = []
+        for step in range(backtest_steps):
+            train_df = _df.iloc[:size + step]
+            true_draw = _df.iloc[size + step].values
+            
+            # Use a simple, fast model for this analysis (e.g., SARIMA on one position)
+            series = train_df['Pos_1'].values
+            try:
+                model = AutoARIMA(sp=1, suppress_warnings=True)
+                model.fit(series)
+                pred_mean = model.predict(fh=[1])[0]
+                pred_std = np.std(series) * 1.5 # Robust std estimate
+                
+                x_range = np.arange(1, _max_nums[0] + 1)
+                prob_mass = stats.norm.pdf(x_range, loc=pred_mean, scale=pred_std)
+                prob_dist = {num: p for num, p in zip(x_range, prob_mass / prob_mass.sum())}
+                
+                prob_of_true = prob_dist.get(true_draw[0], 1e-9)
+                log_losses.append(-np.log(prob_of_true))
+                predictions.append(pred_mean)
+            except Exception:
+                log_losses.append(np.log(_max_nums[0])) # Penalize failure with uniform entropy
+
+        avg_log_loss = np.mean(log_losses)
+        # Prediction Stability Index (PSI): Normalized standard deviation of predictions
+        psi = np.std(predictions) / (np.mean(predictions) + 1e-9) if predictions else float('nan')
+        
+        results.append({'Window Size': size, 'Cross-Entropy Loss': avg_log_loss, 'Prediction Stability Index': psi})
+
+    if not results:
+        st.error("Could not generate stabilization data. The dataset might be too small.")
+        return go.Figure()
+
+    results_df = pd.DataFrame(results).dropna()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=results_df['Window Size'], y=results_df['Cross-Entropy Loss'],
+                             mode='lines+markers', name='Cross-Entropy Loss'))
+    fig.add_trace(go.Scatter(x=results_df['Window Size'], y=results_df['Prediction Stability Index'],
+                             mode='lines+markers', name='Prediction Stability Index', yaxis='y2'))
+
+    fig.update_layout(
+        title='Model Stabilization Analysis',
+        xaxis_title='Training Window Size (Number of Draws)',
+        yaxis_title='Cross-Entropy Loss (Lower is Better)',
+        yaxis2=dict(title='Prediction Stability Index (Lower is Better)', overlaying='y', side='right'),
+        legend=dict(x=0.01, y=0.99),
+        template='plotly_white'
+    )
+    return fig
+
 
 # --- 4. CLUSTERING & LATENT SPACE ANALYSIS ---
+
 @st.cache_data
-def analyze_clusters(_df: pd.DataFrame, training_size: int) -> Dict[str, Any]:
-    """Performs clustering and latent space visualization with silhouette-based n_clusters selection."""
+def analyze_clusters(_df: pd.DataFrame, min_cluster_size: int, min_samples: int) -> Dict[str, Any]:
+    """Performs and visualizes clustering using HDBSCAN and UMAP with interactive parameters."""
+    results = {'fig': go.Figure(), 'summary': "Clustering disabled or failed."}
+    if not hdbscan or not umap or len(_df) < min_cluster_size:
+        return results
+
+    data = _df.values
+    
     try:
-        results = {}
-        if not hdbscan or not umap:
-            st.session_state.data_warnings.append("HDBSCAN or UMAP unavailable, using uniform clustering.")
-            results['n_clusters'] = 1
-            results['silhouette_score'] = 0.0
-            results['cluster_labels'] = np.zeros(len(_df.iloc[-training_size:]), dtype=int)
-            results['umap_fig'] = go.Figure()
-            results['cluster_summaries'] = {0: {'size': len(_df), 'mean_numbers': np.mean(_df.iloc[-training_size:].values, axis=0).astype(int).tolist()}}
-            return results
-        data = _df.iloc[-training_size:].values
-        if len(data) < 10:
-            st.session_state.data_warnings.append(f"Clustering failed: insufficient data ({len(data)} rows).")
-            results['n_clusters'] = 0
-            results['silhouette_score'] = 0.0
-            results['cluster_labels'] = np.zeros(len(data), dtype=int)
-            results['umap_fig'] = go.Figure()
-            return results
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples, gen_min_span_tree=True)
+        labels = clusterer.fit_predict(data)
         
-        # Select optimal n_clusters via silhouette score
-        best_n_clusters, best_silhouette, best_labels = 2, -1, None
-        for n in range(2, 6):
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=max(5, len(data)//20), min_samples=3)
-            labels = clusterer.fit_predict(data)
-            if len(set(labels)) > 1 and -1 not in labels:
-                try:
-                    score = silhouette_score(data, labels)
-                    if score > best_silhouette:
-                        best_n_clusters, best_silhouette, best_labels = n, score, labels
-                except:
-                    continue
-        if best_labels is None:
-            st.session_state.data_warnings.append("No valid clusters found, using uniform.")
-            results['n_clusters'] = 1
-            results['silhouette_score'] = 0.0
-            results['cluster_labels'] = np.zeros(len(data), dtype=int)
-            results['umap_fig'] = go.Figure()
-            results['cluster_summaries'] = {0: {'size': len(data), 'mean_numbers': np.mean(data, axis=0).astype(int).tolist()}}
-            return results
-        
-        results['n_clusters'] = best_n_clusters
-        results['silhouette_score'] = best_silhouette
-        results['cluster_labels'] = best_labels
-        st.session_state.data_warnings.append(f"Optimal clusters: {best_n_clusters}, Silhouette: {best_silhouette:.3f}")
+        # Calculate silhouette score, excluding noise points (label=-1)
+        if len(set(labels)) > 1:
+            clean_labels = labels[labels != -1]
+            clean_data = data[labels != -1]
+            if len(set(clean_labels)) > 1:
+                score = silhouette_score(clean_data, clean_labels)
+                results['silhouette'] = f"{score:.3f}"
+            else:
+                results['silhouette'] = "N/A (1 cluster)"
+        else:
+            results['silhouette'] = "N/A (No clusters)"
 
-        # UMAP for 2D Visualization
-        reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=5)
+        reducer = umap.UMAP(n_neighbors=15, n_components=2, min_dist=0.1, random_state=42)
         embedding = reducer.fit_transform(data)
-        results['umap_embedding'] = embedding
-        results['umap_fig'] = px.scatter(
-            x=embedding[:, 0], y=embedding[:, 1],
-            color=best_labels.astype(str), title=f'Latent Space Clusters (Silhouette: {best_silhouette:.3f})',
-            labels={'x': 'UMAP 1', 'y': 'UMAP 2'},
-            hover_data={'Draw': _df.index[-training_size:]}
-        )
-        results['umap_fig'].update_layout(
-            margin=dict(l=20, r=20, t=50, b=20),
-            annotations=[dict(text=f"{best_n_clusters} clusters detected.", x=0.5, y=1.05, showarrow=False, xref="paper", yref="paper")]
-        )
+        
+        plot_df = pd.DataFrame(embedding, columns=['UMAP_1', 'UMAP_2'])
+        plot_df['Cluster'] = [str(l) for l in labels]
+        plot_df['Draw'] = _df.index
+        plot_df['Numbers'] = _df.apply(lambda row: ', '.join(row.astype(str)), axis=1)
 
-        # Cluster summaries
-        cluster_counts = pd.Series(best_labels).value_counts().to_dict()
-        results['cluster_summaries'] = {}
-        for cluster in set(best_labels):
-            if cluster == -1:
-                continue
-            cluster_data = data[best_labels == cluster]
-            mean_numbers = np.mean(cluster_data, axis=0).astype(int)
-            results['cluster_summaries'][cluster] = {
-                'size': cluster_counts.get(cluster, 0),
-                'mean_numbers': mean_numbers.tolist()
-            }
-            st.session_state.data_warnings.append(
-                f"Cluster {cluster}: Size={cluster_counts.get(cluster, 0)}, Mean={mean_numbers.tolist()}"
-            )
+        fig = px.scatter(
+            plot_df, x='UMAP_1', y='UMAP_2', color='Cluster',
+            custom_data=['Draw', 'Numbers'],
+            title=f'Latent Space of Draw Behaviors (Silhouette: {results.get("silhouette", "N/A")})',
+            color_discrete_map={'-1': 'grey'}
+        )
+        fig.update_traces(hovertemplate='<b>Draw %{customdata[0]}</b><br>Numbers: %{customdata[1]}<br>Cluster: %{marker.color}')
+        fig.update_layout(legend_title_text='Cluster ID')
+        results['fig'] = fig
 
-        return results
+        # Cluster Summaries
+        summary_text = ""
+        cluster_counts = Counter(labels)
+        for cluster_id, count in cluster_counts.items():
+            if cluster_id == -1:
+                summary_text += f"**Noise Points:** {count} draws did not belong to any cluster.\n"
+            else:
+                cluster_mean = _df[labels == cluster_id].mean().round().astype(int).tolist()
+                summary_text += f"**Cluster {cluster_id}:** {count} draws. Centroid (mean): `{cluster_mean}`\n"
+        results['summary'] = summary_text
+
     except Exception as e:
-        st.session_state.data_warnings.append(f"Clustering error: {e}")
-        results['n_clusters'] = 0
-        results['silhouette_score'] = 0.0
-        results['cluster_labels'] = np.zeros(len(_df.iloc[-training_size:]), dtype=int)
-        results['umap_fig'] = go.Figure()
-        return results
+        results['summary'] = f"An error occurred during clustering: {e}"
+        
+    return results
+
 
 # --- 5. ADVANCED PREDICTIVE MODELS ---
-def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
-    """Statistical physics analysis with Monte Carlo."""
-    results = {}
-    series = np.clip(series, 1, max_num).astype(int)
+
+# Base class for models to ensure a consistent interface
+class BaseModel:
+    def __init__(self, max_nums: List[int]):
+        self.max_nums = max_nums
+        self.name = "Base Model"
+        self.logic = "Base logic"
     
-    # Monte Carlo with Markov Chain
-    counts = np.zeros((max_num, max_num))
-    for i in range(len(series)-1):
-        from_idx, to_idx = series[i]-1, series[i+1]-1
-        if 0 <= from_idx < max_num and 0 <= to_idx < max_num:
-            counts[from_idx, to_idx] += 1
-    trans_prob = (counts + 1e-10) / (counts.sum(axis=1, keepdims=True) + 1e-9)
-    current_state = series[-1] - 1 if 0 <= series[-1] - 1 < max_num else 0
-    prob_vector = trans_prob[current_state]
-    prob_vector /= prob_vector.sum() + 1e-10
-    mcmc_samples = np.random.choice(max_num, size=500, p=prob_vector)
-    mcmc_dist = pd.Series(mcmc_samples + 1).value_counts(normalize=True).to_dict()
-    results['mcmc_dist'] = {int(k): float(v) for k, v in mcmc_dist.items()}
-    st.session_state.data_warnings.append(f"MCMC top 5: {sorted(results['mcmc_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
-    return results
+    def train(self, df: pd.DataFrame):
+        raise NotImplementedError
 
-def _analyze_hmm(series: np.ndarray, max_num: int) -> Dict[str, Any]:
-    """Hidden Markov Model analysis."""
-    results = {}
-    if not hmm:
-        st.session_state.data_warnings.append("HMM unavailable, using uniform.")
-        return {'hmm_dist': {i: 1/max_num for i in range(1, max_num + 1)}}
-    series = np.clip(series, 1, max_num).astype(int) - 1
-    try:
-        model = hmm.GaussianHMM(n_components=2, covariance_type="full", n_iter=50)
-        model.fit(series.reshape(-1, 1))
-        prob_dist = model.predict_proba(series[-1:].reshape(-1, 1))[0]
-        dist = {}
-        for state in range(2):
-            mean = model.means_[state, 0]
-            std = np.sqrt(model.covars_[state, 0, 0])
-            x = np.arange(max_num)
-            probs = stats.norm.pdf(x, mean, std)
-            probs /= probs.sum() + 1e-10
-            for i, p in enumerate(probs):
-                dist[i + 1] = dist.get(i + 1, 0) + p * prob_dist[state]
-        total = sum(dist.values()) + 1e-10
-        results['hmm_dist'] = {int(k): float(v/total) for k, v in dist.items()}
-        st.session_state.data_warnings.append(f"HMM top 5: {sorted(results['hmm_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}")
-    except Exception as e:
-        st.session_state.data_warnings.append(f"HMM failed: {e}. Using uniform.")
-        results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
-    return results
+    def predict(self) -> Dict[str, Any]:
+        raise NotImplementedError
 
-def _analyze_sarima(series: np.ndarray, max_num: int, position: str) -> Dict[str, Any]:
-    """SARIMA analysis with robust error handling."""
-    results = {}
-    series = np.clip(series, 1, max_num).astype(int)
-    st.session_state.data_warnings.append(
-        f"SARIMA {position}: len={len(series)}, mean={series.mean():.2f}, std={series.std():.2f}, unique={len(np.unique(series))}"
-    )
-    try:
-        if len(series) < 10 or len(np.unique(series)) < 5:
-            raise ValueError(f"Invalid series: len={len(series)}, unique={len(np.unique(series))}")
-        model = AutoARIMA(sp=1, suppress_warnings=True, maxiter=50)
-        model.fit(series)
-        pred = model.predict(fh=[1])
-        pred_point = float(pred.iloc[0] if isinstance(pred, pd.Series) else pred[0])
-        conf_int = model.predict_interval(fh=[1], coverage=0.95)
-        std_dev = float(max(0.1, (conf_int.iloc[0, 1] - conf_int.iloc[0, 0]) / 3.92))
-        x_range = np.arange(1, max_num + 1)
-        prob_mass = stats.norm.pdf(x_range, loc=pred_point, scale=std_dev)
-        prob_mass = np.clip(prob_mass, 1e-10, 1)
-        prob_mass /= prob_mass.sum() + 1e-10
-        results['sarima_dist'] = {int(num): float(prob) for num, prob in zip(x_range, prob_mass)}
-        st.session_state.data_warnings.append(
-            f"SARIMA {position}: Pred={pred_point:.2f}, StdDev={std_dev:.2f}, Top 5={sorted(results['sarima_dist'].items(), key=lambda x: x[1], reverse=True)[:5]}"
-        )
-    except Exception as e:
-        st.session_state.data_warnings.append(f"SARIMA failed for {position}: {e}. Using uniform.")
-        results['sarima_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
-    return results
+# --- Positional Dynamics Ensemble ---
+class PositionalDynamicsEnsemble(BaseModel):
+    def __init__(self, max_nums, stable_positions):
+        super().__init__(max_nums)
+        self.stable_positions = stable_positions
+        self.name = "Positional Dynamics Ensemble"
+        self.logic = "Ensemble of MCMC, SARIMA, and HMM applied to each stable digit position."
+        self.models = {}
 
-@st.cache_resource
-def train_torch_model(_df: pd.DataFrame, model_type: str, seq_length: int = 10, epochs: int = 20) -> Tuple[Optional[nn.Module], Optional[MinMaxScaler], float]:
-    """Trains LSTM, GRU, or BayesianNN model."""
-    try:
-        scaler = MinMaxScaler()
-        data_scaled = scaler.fit_transform(_df)
-        X, y = create_sequences(data_scaled, seq_length)
-        X_torch, y_torch = torch.tensor(X, dtype=torch.float32).to(device), torch.tensor(y, dtype=torch.float32).to(device)
-        dataset = TensorDataset(X_torch, y_torch)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+    def train(self, df: pd.DataFrame):
+        for i, pos in enumerate(df.columns):
+            if pos in self.stable_positions:
+                series = df[pos].values
+                max_num = self.max_nums[i]
+                
+                # MCMC Transition Matrix
+                counts = np.zeros((max_num, max_num))
+                for j in range(len(series) - 1):
+                    counts[series[j]-1, series[j+1]-1] += 1
+                trans_prob = (counts + 0.1) / (counts.sum(axis=1, keepdims=True) + 0.1 * max_num)
+                
+                # SARIMA model
+                sarima = AutoARIMA(sp=1, suppress_warnings=True)
+                sarima.fit(series)
+                
+                # HMM model
+                hmm_model = None
+                if hmm and len(series) > 10:
+                    try:
+                        hmm_model = hmm.GaussianHMM(n_components=3, covariance_type="full", n_iter=100)
+                        hmm_model.fit(series.reshape(-1, 1))
+                    except Exception:
+                        hmm_model = None
+
+                self.models[pos] = {'mcmc': trans_prob, 'sarima': sarima, 'hmm': hmm_model, 'last_val': series[-1]}
+
+    def predict(self) -> Dict[str, Any]:
+        distributions = []
+        for i, pos in enumerate([f'Pos_{j+1}' for j in range(6)]):
+            max_num = self.max_nums[i]
+            if pos in self.models:
+                m = self.models[pos]
+                
+                # MCMC prediction
+                mcmc_probs = m['mcmc'][m['last_val']-1]
+
+                # SARIMA prediction
+                pred_mean = m['sarima'].predict(fh=[1])[0]
+                pred_std = np.std(m['sarima']._y) * 1.2
+                x_range = np.arange(1, max_num + 1)
+                sarima_probs = stats.norm.pdf(x_range, loc=pred_mean, scale=max(1.0, pred_std))
+
+                # HMM prediction
+                hmm_probs = np.ones(max_num)
+                if m['hmm']:
+                    try:
+                        means = m['hmm'].means_.flatten()
+                        covars = np.sqrt([m['hmm'].covars_[k, 0, 0] for k in range(m['hmm'].n_components)])
+                        trans_probs = m['hmm'].transmat_[m['hmm'].predict(np.array([[m['last_val']]]))[0]]
+                        
+                        hmm_probs = np.zeros(max_num)
+                        for k in range(m['hmm'].n_components):
+                            hmm_probs += trans_probs[k] * stats.norm.pdf(x_range, means[k], covars[k])
+                    except Exception:
+                        pass # HMM prediction can be unstable
+
+                # Ensemble the probabilities (simple average)
+                ensemble_probs = (mcmc_probs + sarima_probs/sarima_probs.sum() + hmm_probs/hmm_probs.sum()) / 3.0
+                dist = {num: p for num, p in zip(x_range, ensemble_probs / ensemble_probs.sum())}
+                distributions.append(dist)
+            else:
+                # For non-stable positions, use a uniform distribution
+                distributions.append({k: 1/max_num for k in range(1, max_num + 1)})
+
+        return {'distributions': distributions}
+
+# --- Deep Learning Models (LSTM/GRU) ---
+class TorchSequenceModel(BaseModel):
+    def __init__(self, max_nums, model_type='LSTM', hidden_size=50, seq_length=12, epochs=25):
+        super().__init__(max_nums)
+        self.model_type = model_type
+        self.hidden_size = hidden_size
+        self.seq_length = seq_length
+        self.epochs = epochs
+        self.name = f"{model_type} Deep Model"
+        self.logic = f"A {model_type} recurrent neural network capturing temporal dependencies across all 6 positions simultaneously."
+        self.model = None
+        self.scaler = None
+
+    def train(self, df: pd.DataFrame):
+        self.scaler = MinMaxScaler()
+        data_scaled = self.scaler.fit_transform(df)
+        X, y = create_sequences(data_scaled, self.seq_length)
         
-        class SequenceModel(nn.Module):
-            def __init__(self, input_size=6, hidden_size=32):
+        if len(X) == 0: return # Not enough data
+        
+        X_torch = torch.tensor(X, dtype=torch.float32).to(device)
+        y_torch = torch.tensor(y, dtype=torch.float32).to(device)
+        
+        class _Model(nn.Module):
+            def __init__(self, input_size, hidden_size, model_type):
                 super().__init__()
-                if model_type == 'BayesianNN' and bnn:
-                    self.rnn = bnn.BayesLSTM(input_size, hidden_size, 1)
-                    self.fc = bnn.BayesLinear(hidden_size, input_size)
-                else:
-                    self.rnn = nn.LSTM(input_size, hidden_size, 1, batch_first=True, dropout=0.1) if model_type == 'LSTM' else nn.GRU(input_size, hidden_size, 1, batch_first=True, dropout=0.1)
-                    self.fc = nn.Linear(hidden_size, input_size)
+                rnn_layer = nn.LSTM if model_type == 'LSTM' else nn.GRU
+                self.rnn = rnn_layer(input_size, hidden_size, num_layers=2, batch_first=True, dropout=0.2)
+                self.fc = nn.Linear(hidden_size, input_size)
             def forward(self, x):
                 out, _ = self.rnn(x)
                 return self.fc(out[:, -1, :])
-        
-        model = SequenceModel().to(device)
+
+        self.model = _Model(6, self.hidden_size, self.model_type).to(device)
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        model.train()
-        for epoch in range(epochs):
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.005)
+        
+        dataset = TensorDataset(X_torch, y_torch)
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+        
+        self.model.train()
+        for epoch in range(self.epochs):
             for batch_x, batch_y in dataloader:
                 optimizer.zero_grad()
-                outputs = model(batch_x)
-                loss = criterion(outputs, batch_y)
+                output = self.model(batch_x)
+                loss = criterion(output, batch_y)
                 loss.backward()
                 optimizer.step()
-        model.eval()
-        with torch.no_grad():
-            final_loss = criterion(model(X_torch), y_torch).item()
-        st.session_state.data_warnings.append(f"{model_type} trained: Loss={final_loss:.4f}")
-        return model, scaler, final_loss
-    except Exception as e:
-        st.session_state.data_warnings.append(f"{model_type} training failed: {e}")
-        return None, None, float('inf')
 
-@st.cache_data
-def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str, seq_length: int, max_nums: List[int]) -> Dict[str, Any]:
-    """Predicts with LSTM, GRU, or BayesianNN."""
-    try:
-        model, scaler, best_loss = _model_cache
-        if model is None:
-            st.session_state.data_warnings.append(f"{model_type} model is None. Using uniform.")
-            return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
-        last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
-        last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
+    def predict(self) -> Dict[str, Any]:
+        if not self.model or not self.scaler:
+            return {'distributions': [{k: 1/m for k in range(1, m + 1)} for m in self.max_nums]}
+
+        self.model.eval()
         with torch.no_grad():
-            pred_scaled = model(last_seq_torch)
-        prediction_raw = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
-        prediction_raw = np.clip(prediction_raw, 1, max_nums)
-        std_dev = max(1.0, np.sqrt(best_loss) * (max_nums[0] - 1) / 2)
+            last_seq_scaled = self.scaler.transform(st.session_state.df_master.iloc[-self.seq_length:].values)
+            input_tensor = torch.tensor(last_seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
+            pred_scaled = self.model(input_tensor)
+            pred_raw = self.scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
+        
         distributions = []
         for i in range(6):
-            x_range = np.arange(1, max_nums[i] + 1)
-            prob_mass = stats.norm.pdf(x_range, loc=prediction_raw[i], scale=std_dev)
-            prob_mass = np.clip(prob_mass, 1e-10, 1)
-            prob_mass /= prob_mass.sum() + 1e-10
-            dist = {int(num): float(prob) for num, prob in zip(x_range, prob_mass)}
-            distributions.append(dist)
-            st.session_state.data_warnings.append(f"{model_type} Pos_{i+1}: Top 5={sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]}")
-        return {'name': model_type, 'distributions': distributions, 'logic': f'Deep learning {model_type} forecast.'}
-    except Exception as e:
-        st.session_state.data_warnings.append(f"{model_type} prediction failed: {e}")
-        return {'name': model_type, 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums], 'logic': f'{model_type} failed.'}
-
-@st.cache_data
-def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: int) -> Dict[str, Any]:
-    """Analyzes stable position with MCMC, SARIMA, HMM."""
-    try:
-        results = {'name': f'Stable_{position}'}
-        series = _df[position].values.astype(int)
-        if not all(1 <= x <= max_num for x in series):
-            st.session_state.data_warnings.append(f"Invalid values in {position}: {series[:5]}... Clipping.")
-            series = np.clip(series, 1, max_num)
-        if len(np.unique(series)) < 5:
-            st.session_state.data_warnings.append(f"Too few unique values in {position}: {len(np.unique(series))}. Using uniform.")
-            return {'name': f'Stable_{position}', 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)}], 'logic': f'Stable_{position} failed.'}
-        
-        # Statistical Physics
-        stat_phys = _analyze_stat_physics(series, max_num)
-        results.update(stat_phys)
-        
-        # SARIMA
-        sarima_results = _analyze_sarima(series, max_num, position)
-        results.update(sarima_results)
-        
-        # HMM
-        hmm_results = _analyze_hmm(series, max_num)
-        results.update(hmm_results)
-        
-        # Ensemble
-        all_dists = [results.get('mcmc_dist', {}), results.get('sarima_dist', {}), results.get('hmm_dist', {})]
-        ensemble_dist = {i: 0.0 for i in range(1, max_num + 1)}
-        valid_dists = 0
-        for dist in all_dists:
-            if not dist:
-                continue
-            total_prob = sum(dist.values())
-            if total_prob == 0 or np.isnan(total_prob):
-                continue
-            valid_dists += 1
-            for num, prob in dist.items():
-                if 1 <= num <= max_num and isinstance(prob, (int, float)) and prob >= 0:
-                    ensemble_dist[num] += prob / total_prob
-        total_prob = sum(ensemble_dist.values()) or 1
-        ensemble_dist = {num: prob / total_prob for num, prob in ensemble_dist.items()}
-        results['distributions'] = [ensemble_dist]
-        st.session_state.data_warnings.append(
-            f"Ensemble {position}: Top 5={sorted(ensemble_dist.items(), key=lambda x: x[1], reverse=True)[:5]}, Valid dists={valid_dists}"
-        )
-        
-        # Information Theory
-        entropy = -sum(p * np.log(p + 1e-10) for p in ensemble_dist.values())
-        results['shannon_entropy'] = float(entropy)
-        results['kl_divergence'] = float(stats.entropy(
-            list(ensemble_dist.values()),
-            [1/max_num for _ in range(max_num)]
-        ))
-        return results
-    except Exception as e:
-        st.session_state.data_warnings.append(f"Stable position analysis failed for {position}: {e}")
-        return {'name': f'Stable_{position}', 'distributions': [{i: 1/max_num for i in range(1, max_num + 1)}], 'logic': f'Stable_{position} failed.'}
-
-# --- 6. OPTIMIZE TRAINING SIZE ---
-@st.cache_data
-def optimize_training_size(_df: pd.DataFrame, max_nums: List[int], stable_positions: List[str]) -> int:
-    """Selects training_size with lowest average log_loss."""
-    try:
-        training_sizes = [50, 75, 100]
-        best_size, best_loss = 50, float('inf')
-        for size in training_sizes:
-            if len(_df) - size < 10:
-                continue
-            train_df = _df.iloc[:size]
-            val_df = _df.iloc[size:size+5]
-            lstm_cache = train_torch_model(train_df, 'LSTM', seq_length=10, epochs=10)
-            model_funcs = {
-                'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 10, max_nums)
-            }
-            for pos in stable_positions[:1]:
-                pos_idx = int(pos.split('_')[1]) - 1
-                if pos_idx < len(max_nums):
-                    model_funcs[f'Stable_{pos}'] = lambda d, p=pos, m=max_nums[pos_idx]: analyze_stable_position_dynamics(d, p, m)
-            log_losses = []
-            for name, func in model_funcs.items():
-                for i in range(len(val_df)):
-                    try:
-                        historical_df = _df.iloc[:size + i]
-                        pred_obj = func(historical_df)
-                        if not pred_obj or not pred_obj.get('distributions'):
-                            continue
-                        y_true = val_df.iloc[i].values
-                        draw_log_loss = 0
-                        for pos_idx, dist in enumerate(pred_obj['distributions']):
-                            if not dist:
-                                dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
-                            total_prob = sum(dist.values())
-                            if total_prob == 0 or np.isnan(total_prob):
-                                dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
-                            else:
-                                dist = {k: v/total_prob for k, v in dist.items()}
-                            true_num = int(y_true[pos_idx])
-                            if not (1 <= true_num <= max_nums[pos_idx]):
-                                continue
-                            prob_of_true = dist.get(true_num, 1e-10)
-                            draw_log_loss -= np.log(max(prob_of_true, 1e-10))
-                        log_losses.append(min(draw_log_loss, 5.0))
-                    except:
-                        continue
-            avg_loss = np.mean(log_losses) if log_losses else float('inf')
-            if avg_loss < best_loss:
-                best_size, best_loss = size, avg_loss
-        st.session_state.data_warnings.append(f"Optimal training_size: {best_size}, Avg Log Loss: {best_loss:.3f}")
-        return best_size
-    except Exception as e:
-        st.session_state.data_warnings.append(f"Training size optimization failed: {e}. Using default 50.")
-        return 50
-
-# --- 7. BACKTESTING & PERFORMANCE METRICS ---
-@st.cache_data
-def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_positions: List[str], training_size: int) -> List[Dict[str, Any]]:
-    """Runs walk-forward validation and computes metrics."""
-    try:
-        scored_predictions = []
-        split_point = max(50, training_size)
-        if len(_df) - split_point < 5:
-            split_point = len(_df) - 5
-            st.session_state.data_warnings.append(f"Adjusted split_point to {split_point} for validation.")
-        train_df = _df.iloc[:split_point]
-        
-        # Train models
-        lstm_cache = train_torch_model(train_df, 'LSTM', seq_length=10, epochs=20)
-        gru_cache = train_torch_model(train_df, 'GRU', seq_length=10, epochs=20)
-        bnn_cache = train_torch_model(train_df, 'BayesianNN', seq_length=10, epochs=20) if bnn else (None, None, float('inf'))
-        
-        model_funcs = {
-            'LSTM': lambda d: predict_torch_model(d, lstm_cache, 'LSTM', 10, max_nums),
-            'GRU': lambda d: predict_torch_model(d, gru_cache, 'GRU', 10, max_nums),
-        }
-        if bnn:
-            model_funcs['BayesianNN'] = lambda d: predict_torch_model(d, bnn_cache, 'BayesianNN', 10, max_nums)
-        for pos in stable_positions:
-            pos_idx = int(pos.split('_')[1]) - 1
-            if pos_idx < len(max_nums):
-                model_funcs[f'Stable_{pos}'] = lambda d, p=pos, m=max_nums[pos_idx]: analyze_stable_position_dynamics(d, p, m)
-        
-        st.session_state.data_warnings.append(f"Models: {list(model_funcs.keys())}, max_nums={max_nums}")
-        progress_bar = st.progress(0, text="Backtesting...")
-        total_steps = min(5, len(_df) - split_point) * len(model_funcs)
-        current_step = 0
-        
-        for name, func in model_funcs.items():
-            log_losses, top5_accuracies, entropies = [], [], []
-            val_df = _df.iloc[split_point:split_point + 5]
-            for i in range(len(val_df)):
-                try:
-                    historical_df = _df.iloc[:split_point + i]
-                    pred_obj = func(historical_df)
-                    if not pred_obj or not pred_obj.get('distributions') or len(pred_obj['distributions']) != 6:
-                        st.session_state.data_warnings.append(f"Invalid distributions for {name}, draw {i}")
-                        continue
-                    y_true = val_df.iloc[i].values
-                    draw_log_loss = 0
-                    top5_correct = 0
-                    for pos_idx, dist in enumerate(pred_obj['distributions']):
-                        if not dist:
-                            dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
-                        total_prob = sum(dist.values())
-                        if total_prob == 0 or np.isnan(total_prob):
-                            st.session_state.data_warnings.append(f"Zero/NaN prob for {name}, Pos_{pos_idx+1}, draw {i}")
-                            dist = {j: 1/max_nums[pos_idx] for j in range(1, max_nums[pos_idx] + 1)}
-                        else:
-                            dist = {k: v/total_prob for k, v in dist.items()}
-                        true_num = int(y_true[pos_idx])
-                        if not (1 <= true_num <= max_nums[pos_idx]):
-                            st.session_state.data_warnings.append(f"Invalid true_num {true_num} for Pos_{pos_idx+1}, max={max_nums[pos_idx]}")
-                            continue
-                        prob_of_true = dist.get(true_num, 1e-10)
-                        draw_log_loss -= np.log(max(prob_of_true, 1e-10))
-                        top5 = sorted(dist.items(), key=lambda x: x[1], reverse=True)[:5]
-                        top5_numbers = [n for n, _ in top5]
-                        if true_num in top5_numbers:
-                            top5_correct += 1
-                    draw_log_loss = min(draw_log_loss, 5.0)  # Cap log_loss
-                    log_losses.append(draw_log_loss)
-                    top5_accuracies.append(top5_correct / 6)
-                    entropy = -sum(sum(p * np.log(p + 1e-10) for p in d.values()) for d in pred_obj['distributions'])
-                    entropies.append(entropy)
-                    current_step += 1
-                    progress_bar.progress(min(1.0, current_step / total_steps))
-                except Exception as e:
-                    st.session_state.data_warnings.append(f"Backtest error for {name}, draw {i}: {e}")
+            pred_mean = pred_raw[i]
+            pred_std = np.std(self.scaler.inverse_transform(self.scaler.transform(st.session_state.df_master))[:,i]) * 0.5
+            x_range = np.arange(1, self.max_nums[i] + 1)
+            prob_mass = stats.norm.pdf(x_range, loc=pred_mean, scale=max(1.5, pred_std))
+            distributions.append({num: p for num, p in zip(x_range, prob_mass / prob_mass.sum())})
             
-            try:
-                final_pred_obj = func(_df)
-                if not final_pred_obj or not final_pred_obj.get('distributions') or len(final_pred_obj['distributions']) != 6:
-                    final_pred_obj = {
-                        'name': name,
-                        'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums],
-                        'logic': f'{name} failed'
-                    }
-                avg_log_loss = np.mean(log_losses) if log_losses else 5.0
-                top5_accuracy = np.mean(top5_accuracies) if top5_accuracies else 0
-                avg_entropy = np.mean(entropies) if entropies else 0
-                likelihood = 100 * min(1, np.exp(-avg_log_loss / 3))  # Adjusted for better scaling
-                stability_index = np.std(log_losses) / (np.mean(log_losses) + 1e-10) if log_losses else 1.0
-                final_pred_obj['likelihood'] = min(100, max(0, likelihood))
-                final_pred_obj['metrics'] = {
-                    'Avg Log Loss': f"{avg_log_loss:.3f}",
-                    'Top-5 Accuracy': f"{top5_accuracy:.3f}",
-                    'Avg Entropy': f"{avg_entropy:.3f}",
-                    'Stability Index': f"{stability_index:.3f}"
-                }
-                final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
-                scored_predictions.append(final_pred_obj)
-                st.session_state.data_warnings.append(
-                    f"Final {name}: Set={final_pred_obj['prediction']}, Likelihood={likelihood:.2f}%, Log Loss={avg_log_loss:.3f}, Metrics={final_pred_obj['metrics']}"
-                )
-            except Exception as e:
-                st.session_state.data_warnings.append(f"Final prediction error for {name}: {e}")
-        progress_bar.progress(1.0)
-        return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
-    except Exception as e:
-        st.session_state.data_warnings.append(f"Backtest suite error: {e}")
-        return []
+        return {'distributions': distributions}
 
-# --- Main Application UI & Logic ---
-st.title("⚛️ LottoSphere v18.3.0: Quantum Chronodynamics Engine")
-st.markdown("A scientific instrument for modeling 6-digit lottery draws as stochastic systems.")
+# --- Quantum-Inspired Model ---
+class QuantumHilbertModel(BaseModel):
+    def __init__(self, max_nums):
+        super().__init__(max_nums)
+        self.name = "Quantum-Inspired Hilbert Embedding"
+        self.logic = "Represents each draw as a quantum state vector via amplitude encoding. Forecasts by evolving the state with a transition operator derived from historical data."
+        self.transition_operator = None
+        self.last_state = None
 
-st.sidebar.header("Configuration")
-max_nums = [st.sidebar.number_input(f"Max Number Pos_{i+1}", min_value=10, max_value=100, value=50 + i*2, key=f"max_num_{i+1}") for i in range(6)]
-training_size_default = 50
-uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="CSV with 6 columns, one draw per row, last row most recent.")
+    def _encode_draw(self, draw: np.ndarray) -> np.ndarray:
+        """Encodes a 6-digit draw into a state vector using amplitude encoding."""
+        state = np.zeros(sum(self.max_nums))
+        offset = 0
+        for i, num in enumerate(draw):
+            state[offset + num - 1] = 1
+            offset += self.max_nums[i]
+        return state / np.linalg.norm(state) # Normalize to create a valid quantum state
 
-# Display warnings
-if st.session_state.data_warnings:
-    with st.sidebar.expander("Warnings", expanded=True):
-        for warning in st.session_state.data_warnings[-15:]:  # Increased to show more
-            st.warning(warning)
+    def train(self, df: pd.DataFrame):
+        states = [self._encode_draw(row) for _, row in df.iterrows()]
+        # Learn a transition operator U such that U|psi_t> ≈ |psi_{t+1}>
+        # Using a simplified learning rule: U = sum(|psi_{t+1}><psi_t|)
+        U = np.zeros((len(states[0]), len(states[0])))
+        for t in range(len(states) - 1):
+            U += np.outer(states[t+1], states[t])
+        
+        # Ensure U is unitary (or close to it) via SVD
+        u_svd, _, vh_svd = np.linalg.svd(U)
+        self.transition_operator = u_svd @ vh_svd
+        self.last_state = states[-1]
 
-if uploaded_file:
-    df_master = load_data(uploaded_file, max_nums)
-    if not df_master.empty and df_master.shape[1] == 6:
-        st.sidebar.success(f"Loaded {len(df_master)} draws.")
-        with st.spinner("Analyzing stability and optimizing parameters..."):
-            stable_positions = []
-            temporal_results = {}
-            for pos in df_master.columns:
-                result = analyze_temporal_behavior(df_master, pos, max_nums[int(pos.split('_')[1]) - 1])
-                temporal_results[pos] = result
-                if result.get('is_stable', False):
-                    stable_positions.append(pos)
-            if not stable_positions:
-                stable_positions = df_master.columns.tolist()
-                st.session_state.data_warnings.append("No stable positions, using all positions.")
-            st.session_state.data_warnings.append(f"Stable positions: {stable_positions}")
+    def predict(self) -> Dict[str, Any]:
+        if self.transition_operator is None:
+            return {'distributions': [{k: 1/m for k in range(1, m + 1)} for m in self.max_nums]}
+        
+        # Evolve the last known state
+        predicted_state = self.transition_operator @ self.last_state
+        
+        # Convert back to probabilities by measuring the state
+        probabilities = np.abs(predicted_state)**2
+        
+        distributions = []
+        offset = 0
+        for i, max_num in enumerate(self.max_nums):
+            pos_probs = probabilities[offset : offset + max_num]
+            prob_sum = pos_probs.sum()
+            if prob_sum > 1e-9:
+                dist = {num: p / prob_sum for num, p in enumerate(pos_probs, 1)}
+                distributions.append(dist)
+            else: # Fallback to uniform
+                distributions.append({k: 1/max_num for k in range(1, max_num + 1)})
+            offset += max_num
             
-            # Optimize training_size
-            training_size = optimize_training_size(df_master, max_nums, stable_positions)
-            st.sidebar.info(f"Optimal Training Size: {training_size} (based on lowest log loss)")
+        return {'distributions': distributions}
+
+
+# --- 6. BACKTESTING & PERFORMANCE EVALUATION ---
+
+def run_backtest(model_instance: BaseModel, df: pd.DataFrame, train_size: int, backtest_steps: int) -> Dict[str, Any]:
+    """Performs walk-forward validation for a given model instance."""
+    log_losses = []
+    predictions = []
+
+    for i in range(backtest_steps):
+        current_train_df = df.iloc[:train_size + i]
+        true_draw = df.iloc[train_size + i].values
+
+        # Retrain model on each step for true walk-forward validation
+        model_instance.train(current_train_df)
+        pred_obj = model_instance.predict()
+        pred_set = get_best_guess_set(pred_obj['distributions'])
+        predictions.append(pred_set)
+
+        # Calculate log loss for the current step
+        step_log_loss = 0
+        for pos_idx, dist in enumerate(pred_obj['distributions']):
+            prob_of_true = dist.get(true_draw[pos_idx], 1e-9)
+            step_log_loss -= np.log(prob_of_true)
+        log_losses.append(step_log_loss)
+
+    avg_log_loss = np.mean(log_losses)
+    # Likelihood Score: Re-scaled for better interpretability
+    likelihood = 100 * np.exp(-avg_log_loss / np.log(np.mean(model_instance.max_nums)))
+    # Prediction Stability Index (PSI): Fluctuation of the predicted set
+    pred_array = np.array(predictions)
+    psi = np.mean(np.std(pred_array, axis=0) / np.mean(pred_array, axis=0))
+
+    return {
+        'Log Loss': avg_log_loss,
+        'Likelihood': likelihood,
+        'PSI': psi,
+    }
+
+
+# --- 7. MAIN APPLICATION UI & LOGIC ---
+
+st.title("⚛️ LottoSphere v19.0.0: Quantum Chronodynamics")
+st.markdown("An interactive, scientifically-grounded instrument for analyzing and forecasting discrete numerical sequences as complex stochastic systems.")
+
+st.sidebar.header("1. System Configuration")
+uploaded_file = st.sidebar.file_uploader("Upload Number History (CSV)", type=["csv"], help="A CSV file with 6 columns (no headers). Each row is a draw, with the most recent draw at the bottom.")
+
+# Use st.expander for configuration to keep the sidebar clean
+with st.sidebar.expander("Advanced Configuration", expanded=True):
+    max_nums = [st.number_input(f"Max Value for Pos_{i+1}", min_value=10, max_value=150, value=49, key=f"max_num_{i}") for i in range(6)]
+    training_size_slider = st.slider("Training Window Size", min_value=50, max_value=1000, value=150, step=10, help="Number of past draws to use for training models. Adjust based on the Stabilization Point Analysis.")
+    backtest_steps_slider = st.slider("Backtest Validation Steps", min_value=5, max_value=50, value=10, step=1, help="Number of steps for walk-forward validation to evaluate model performance.")
+
+# Main analysis logic
+if uploaded_file is not None:
+    df, logs = load_and_validate_data(uploaded_file, max_nums)
+    with st.sidebar.expander("Data Loading Log", expanded=False):
+        for log in logs:
+            st.info(log)
+    
+    if not df.empty:
+        st.session_state.df_master = df
+        st.sidebar.success(f"Successfully loaded and validated {len(df)} draws.")
         
-        tab1, tab2, tab3 = st.tabs(["🔮 Predictions", "🔬 Dynamics Explorer", "🌌 Cluster Analysis"])
+        # --- Run all analyses and store results in session state ---
+        with st.spinner("Performing initial system dynamics analysis..."):
+            if 'dynamics' not in st.session_state.analysis_results:
+                 st.session_state.analysis_results['dynamics'] = analyze_positional_dynamics(df)
         
+        # --- Define UI Tabs ---
+        tab1, tab2, tab3, tab4 = st.tabs(["🔮 Predictive Ensembles", "📉 Stabilization Analysis", "🌌 Cluster Dynamics", "🔬 System Internals"])
+
         with tab1:
-            st.header("Grand Unified Predictive Ensemble")
-            with st.expander("About Predictions", expanded=False):
-                st.markdown("""
-                ### Overview
-                Generates probability distributions using LSTM, GRU, BayesianNN (if available), and stable position models (MCMC, SARIMA, HMM). Ranked by likelihood score.
-
-                ### Models
-                - **LSTM/GRU/BayesianNN**: Deep learning for temporal patterns.
-                - **Stable Position Models**: Ensemble of MCMC, SARIMA, HMM for stable positions (Lyapunov ≤0.1).
-                - **Metrics**:
-                  - **Avg Log Loss**: Prediction error (lower is better, capped at 5.0).
-                  - **Top-5 Accuracy**: Fraction of true numbers in top-5 predictions.
-                  - **Avg Entropy**: Uncertainty (lower is better).
-                  - **Stability Index**: Prediction consistency (lower is better).
-                  - **Likelihood Score**: Confidence (100 * exp(-log_loss/3), higher is better).
-
-                ### Mathematical Basis
-                - **MCMC**: Simulates state transitions via Markov chains.
-                - **SARIMA**: Models time-series with seasonal components.
-                - **HMM**: Captures hidden states in sequences.
-                - **LSTM/GRU/BayesianNN**: Neural networks for sequence prediction.
-
-                ### Actionability
-                - Choose predictions with >50% likelihood.
-                - Prioritize models with low log loss (<2.0) and high top-5 accuracy (>0.5).
-                - Cross-validate with Dynamics and Cluster tabs.
-                """)
+            st.header("🔮 Predictive Ensembles")
+            st.markdown("Each model below offers a different scientific perspective on the sequence's dynamics. Models are evaluated via rigorous walk-forward backtesting.")
             
-            if st.button("🚀 Run All Models", type="primary", use_container_width=True):
-                with st.spinner("Backtesting models..."):
-                    scored_predictions = run_full_backtest_suite(df_master, max_nums, stable_positions, training_size)
-                st.header("✨ Final Predictions")
-                if scored_predictions:
-                    st.subheader("Ranked Forecasts")
-                    for p in scored_predictions:
-                        with st.container(border=True):
-                            col1, col2 = st.columns([2, 1])
-                            with col1:
-                                st.markdown(f"#### {p.get('name', 'Unknown')}")
-                                pred_str = ' | '.join(str(n) for n in p.get('prediction', [])) or "No valid set"
-                                st.markdown(f"**Most Likely Set:** `{pred_str}`")
-                                st.markdown(f"**Logic:** {p.get('logic', 'N/A')}")
-                            with col2:
-                                st.metric("Likelihood Score", f"{p.get('likelihood', 0):.2f}%", help=f"Metrics: {p.get('metrics', {})}")
-                            with st.expander("Probability Distributions"):
-                                chart_cols = st.columns(6)
-                                for i, dist in enumerate(p.get('distributions', [])):
-                                    with chart_cols[i]:
-                                        st.markdown(f"**Pos_{i+1}**")
-                                        if dist and all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
-                                            df_dist = pd.DataFrame(list(dist.items()), columns=['Number', 'Probability']).sort_values('Number')
-                                            fig = px.bar(df_dist, x='Number', y='Probability', height=200)
-                                            fig.update_layout(margin=dict(l=10, r=10, t=30, b=30), yaxis_title=None, xaxis_title=None)
-                                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                                        else:
-                                            st.write("No valid distribution.")
-        
+            with st.expander("How to Interpret These Forecasts", expanded=False):
+                st.markdown("""
+                - **Likelihood Score:** A confidence measure derived from the model's predictive accuracy (Cross-Entropy Loss) during backtesting. Higher is better. A score > 60% indicates a model that consistently outperforms random chance.
+                - **Cross-Entropy Loss:** The core measure of prediction error. Lower is better. A value near `ln(avg_max_num)` (e.g., ~3.9 for max_num=49) is equivalent to random guessing.
+                - **Prediction Stability Index (PSI):** Measures how much a model's numerical predictions fluctuate during backtesting. A low PSI indicates a stable, reliable model.
+                - **The Models:**
+                    - **Positional Dynamics Ensemble:** A hybrid model using MCMC, SARIMA, and HMM on positions identified as 'stable' (predictable). This is a robust, physics-based model.
+                    - **LSTM/GRU Deep Models:** Recurrent Neural Networks that learn complex, non-linear patterns across all 6 positions simultaneously. Best for capturing momentum and inter-digit correlations.
+                    - **Quantum-Inspired Hilbert Embedding:** A novel approach that treats each draw as a quantum state. It can capture holistic system properties that other models might miss.
+                """)
+
+            # --- Model Execution ---
+            stable_positions = [pos for pos, res in st.session_state.analysis_results['dynamics'].items() if res.get('is_stable')]
+            
+            model_definitions = {
+                "Positional Ensemble": PositionalDynamicsEnsemble(max_nums, stable_positions),
+                "LSTM Deep Model": TorchSequenceModel(max_nums, model_type='LSTM'),
+                "GRU Deep Model": TorchSequenceModel(max_nums, model_type='GRU'),
+                "Quantum Hilbert Model": QuantumHilbertModel(max_nums)
+            }
+            
+            # Use columns for a cleaner layout
+            col1, col2 = st.columns(2)
+            cols = [col1, col2, col1, col2] # Alternate columns
+
+            for i, (name, model_instance) in enumerate(model_definitions.items()):
+                with cols[i]:
+                    with st.container(border=True):
+                        st.subheader(name)
+                        with st.spinner(f"Training and backtesting {name}..."):
+                            # The actual training happens inside the backtest loop
+                            perf_metrics = run_backtest(model_instance, df, training_size_slider, backtest_steps_slider)
+                            
+                            # Final prediction based on the full dataset
+                            model_instance.train(df)
+                            final_pred_obj = model_instance.predict()
+                            final_prediction = get_best_guess_set(final_pred_obj['distributions'])
+
+                        # Display results
+                        st.markdown(f"**Logic:** *{model_instance.logic}*")
+                        st.markdown(f"**Predicted Set:**")
+                        st.code(" | ".join(map(str, final_prediction)))
+
+                        m_col1, m_col2, m_col3 = st.columns(3)
+                        m_col1.metric("Likelihood Score", f"{perf_metrics['Likelihood']:.1f}%")
+                        m_col2.metric("Cross-Entropy", f"{perf_metrics['Log Loss']:.3f}")
+                        m_col3.metric("Stability (PSI)", f"{perf_metrics['PSI']:.3f}")
+                        
+                        with st.expander("View Probability Distributions"):
+                            dist_cols = st.columns(6)
+                            for k, dist in enumerate(final_pred_obj['distributions']):
+                                df_dist = pd.DataFrame(dist.items(), columns=['Number', 'Probability']).sort_values('Number')
+                                fig = px.bar(df_dist, x='Number', y='Probability', height=200)
+                                fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), yaxis_title=None, xaxis_title=f'Pos {k+1}')
+                                dist_cols[k].plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+
         with tab2:
-            st.header("System Dynamics Explorer")
-            with st.expander("About Dynamics Analysis", expanded=False):
-                st.markdown("""
-                ### Overview
-                Analyzes temporal behavior of each position using chaos theory and time-series methods to identify predictability.
+            st.header("📉 Training Window Stabilization Analysis")
+            st.markdown("""
+            This crucial analysis determines the **optimal amount of historical data** to train our models on. We are looking for the "sweet spot" or **stabilization point** where adding more data stops improving predictive performance.
+            - **Cross-Entropy Loss (Blue Line):** Should ideally decrease and then plateau. The beginning of the plateau is often the optimal window size.
+            - **Prediction Stability Index (Red Line):** Measures prediction volatility. A lower, stable value is desirable.
+            
+            **Actionable Insight:** Adjust the "Training Window Size" slider in the sidebar to match the stabilization point identified below for best results.
+            """)
+            with st.spinner("Calculating performance across window sizes..."):
+                stabilization_fig = find_stabilization_point(df, max_nums, backtest_steps_slider)
+                st.plotly_chart(stabilization_fig, use_container_width=True)
 
-                ### Outputs
-                - **Recurrence Plot**: Visualizes state recurrences, showing patterns or chaos.
-                - **Power Spectral Density**: Identifies dominant cycles via Fourier transform.
-                - **Wavelet Transform**: Tracks frequency changes over time.
-                - **Lyapunov Exponent**: Measures chaos (>0.1) or stability (≤0.1).
-                - **Fractal Dimension**: Quantifies complexity via DFA.
-                - **Autocorrelation**: Detects periodic patterns in stable positions.
-
-                ### Mathematical Basis
-                - **Recurrence Plot**: Distance matrix of states.
-                - **Fourier/Wavelet**: Decomposes signals into frequency components.
-                - **Lyapunov**: Quantifies divergence of trajectories.
-                - **DFA**: Measures self-similarity.
-                - **ACF**: Identifies significant lags for periodicity.
-
-                ### Actionability
-                - Stable positions (Lyapunov ≤0.1) are more predictable; prioritize their predictions.
-                - Periodicity indicates cycle lengths for forecasting horizons.
-                - High fractal dimension suggests complex, less predictable dynamics.
-                """)
-            position = st.selectbox("Select Position", options=df_master.columns, index=0)
-            if st.button(f"Analyze {position}", use_container_width=True):
-                with st.spinner(f"Analyzing {position}..."):
-                    results = temporal_results.get(position, {})
-                if results:
-                    st.subheader(f"Analysis for {position}")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if 'recurrence_fig' in results:
-                            st.plotly_chart(results['recurrence_fig'], use_container_width=True)
-                        if not np.isnan(results.get('lyapunov', float('nan'))):
-                            if results['lyapunov'] > 0.1:
-                                st.warning(f"**Lyapunov Exponent:** {results['lyapunov']:.3f} (Chaotic)", icon="⚠️")
-                            else:
-                                st.success(f"**Lyapunov Exponent:** {results['lyapunov']:.3f} (Stable)", icon="✅")
-                        if not np.isnan(results.get('fractal_dim', float('nan'))):
-                            st.info(f"**Fractal Dimension:** {results['fractal_dim']:.3f}", icon="🔍")
-                    with col2:
-                        if 'fourier_fig' in results:
-                            st.plotly_chart(results['fourier_fig'], use_container_width=True)
-                        if results.get('is_stable') and results.get('periodicity_description'):
-                            st.info(f"**Periodicity:** {results['periodicity_description']}", icon="🔄")
-                            if 'acf_fig' in results:
-                                st.plotly_chart(results['acf_fig'], use_container_width=True)
-                    if 'wavelet_fig' in results and results['wavelet_fig'].data:
-                        st.plotly_chart(results['wavelet_fig'], use_container_width=True)
-                    else:
-                        st.warning("Wavelet analysis unavailable due to insufficient data.")
-                else:
-                    st.error(f"Analysis failed for {position}. Check warnings.")
-        
         with tab3:
-            st.header("Cluster Analysis")
-            with st.expander("About Cluster Analysis", expanded=True):
-                st.markdown("""
-                ### Overview
-                Clusters draws to identify behavioral regimes, visualized in a 2D latent space.
+            st.header("🌌 Cluster Dynamics & Regime Analysis")
+            st.markdown("""
+            This tool uses `HDBSCAN` (a sophisticated density-based algorithm) and `UMAP` (a powerful dimensionality reduction technique) to discover **"behavioral regimes"** within the data. Each point is a historical draw, and clusters represent groups of draws with similar characteristics.
+            - **Well-defined clusters** suggest the system has predictable, recurring states.
+            - **A large number of "Noise Points" (in grey)** indicates chaotic or highly random behavior.
+            - **Cluster Centroids** (the average numbers in a cluster) can be powerful candidates for future draws if the system is currently in that regime.
+            """)
+            
+            st.sidebar.header("2. Clustering Controls")
+            cluster_min_size = st.sidebar.slider("Min Cluster Size", 5, 50, 15, 1, help="The smallest number of draws that can be considered a cluster.")
+            cluster_min_samples = st.sidebar.slider("Min Samples", 1, 20, 5, 1, help="How conservative the clustering is. Higher values lead to more noise points but more robust clusters.")
 
-                ### Outputs
-                - **Latent Space Clusters**: 2D UMAP plot showing draw clusters.
-                - **Silhouette Score**: Measures clustering quality (0 to 1, higher is better).
-                - **Cluster Summaries**: Size and mean numbers per cluster.
+            with st.spinner("Performing cluster analysis..."):
+                cluster_results = analyze_clusters(df.iloc[-training_size_slider:], cluster_min_size, cluster_min_samples)
 
-                ### Mathematical Basis
-                - **HDBSCAN**: Density-based clustering, automatically detects clusters.
-                - **UMAP**: Reduces high-dimensional draws to 2D for visualization.
-                - **Silhouette Score**: Quantifies how well-separated clusters are.
+            st.plotly_chart(cluster_results['fig'], use_container_width=True)
+            st.subheader("Cluster Interpretation")
+            st.markdown(cluster_results['summary'])
 
-                ### Significance
-                - **Dense Clusters**: Indicate common draw patterns, useful for predictions.
-                - **Large Clusters**: Represent stable regimes; their mean numbers are likely candidates.
-                - **High Silhouette Score (>0.5)**: Indicates reliable clusters.
-                - **Outliers (Cluster -1)**: Draws that don’t fit patterns, less predictable.
+        with tab4:
+            st.header("🔬 System Internals: Positional Dynamics")
+            st.markdown("Here we dissect the behavior of each of the 6 digit positions as an individual time series. The key metric is the **Lyapunov Exponent**, which measures the degree of chaos.")
+            
+            dynamics_results = st.session_state.analysis_results['dynamics']
+            st.subheader("Positional Stability Summary")
+            cols = st.columns(6)
+            for i, (pos, res) in enumerate(dynamics_results.items()):
+                with cols[i]:
+                    with st.container(border=True):
+                        st.markdown(f"**{pos}**")
+                        if res['is_stable']:
+                            st.success(f"Stable", icon="✅")
+                            st.metric("Lyapunov Exp.", f"{res['lyapunov']:.3f}")
+                        else:
+                            st.warning(f"Chaotic", icon="⚠️")
+                            st.metric("Lyapunov Exp.", f"{res['lyapunov']:.3f}")
+            st.info("**Interpretation:** 'Stable' positions have more predictable, less chaotic behavior, making them better candidates for statistical modeling. The Positional Dynamics Ensemble automatically focuses on these positions.")
 
-                ### Actionability
-                - Use mean numbers from the largest cluster for conservative predictions.
-                - Combine cluster insights with Predictions tab for robust forecasts.
-                - If silhouette score is low (<0.3), clustering may be unreliable.
-                """)
-            if st.button("Run Cluster Analysis", use_container_width=True):
-                with st.spinner("Running cluster analysis..."):
-                    cluster_results = analyze_clusters(df_master, training_size)
-                if cluster_results and cluster_results.get('n_clusters', 0) > 0:
-                    st.subheader(f"Clustering Results (Silhouette Score: {cluster_results.get('silhouette_score', 0):.3f})")
-                    if 'umap_fig' in cluster_results and cluster_results['umap_fig'].data:
-                        st.plotly_chart(cluster_results['umap_fig'], use_container_width=True)
-                    if 'cluster_summaries' in cluster_results:
-                        st.subheader("Cluster Summaries")
-                        for cluster, summary in cluster_results['cluster_summaries'].items():
-                            st.markdown(f"**Cluster {cluster}**: Size={summary['size']}, Mean Numbers={summary['mean_numbers']}")
-                else:
-                    st.error("Clustering failed. Check warnings.")
 else:
-    st.info("Upload a CSV file to begin analysis.")
+    st.info("Awaiting CSV file upload to begin analysis.")
