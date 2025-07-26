@@ -16,6 +16,10 @@
 # maximum numbers based on sequence length (3 to 6), a substantially expanded explanation
 # of System Dynamics Explorer results, and new detailed explanations for Predictive Maturity
 # Analysis plots and Ranked Predictions by Historical Performance methods.
+#
+# CHANGELOG:
+# - Ensured predictions per position respect user-specified maximum numbers (max_nums).
+# - Explicitly handled CSV data as temporal, with most recent draws as the last rows.
 # ======================================================================================================
 
 import streamlit as st
@@ -102,7 +106,8 @@ def load_data(uploaded_file, max_nums):
             return pd.DataFrame()
         
         # Sort each row to create stable positional time series
-        st.session_state.data_warning = "Input data sorted per row to create positional time series."
+        # Data is temporal: last rows are most recent draws
+        st.session_state.data_warning = "Input data sorted per row to create positional time series. Last rows are treated as most recent draws."
         sorted_values = np.sort(df.values, axis=1)
         # Ensure sorted values respect position-specific maximums
         for i, max_num in enumerate(max_nums):
@@ -116,6 +121,7 @@ def create_sequences(data, seq_length):
     if seq_length >= len(data):
         raise ValueError("Sequence length must be less than data length")
     xs, ys = [], []
+    # Create sequences chronologically: most recent draws at higher indices
     for i in range(len(data) - seq_length):
         x = data[i:(i + seq_length)]
         y = data[i + seq_length]
@@ -286,6 +292,7 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
         if model is None:
             raise ValueError(f"{model_type} model training failed")
         
+        # Use the most recent seq_length draws for prediction
         last_seq = scaler.transform(_df.iloc[-seq_length:].values).reshape(1, seq_length, 6)
         last_seq_torch = torch.tensor(last_seq, dtype=torch.float32).to(device)
         
@@ -293,28 +300,44 @@ def predict_torch_model(_df, _model_cache, model_type='LSTM', seq_length=3, max_
         with torch.no_grad():
             pred_scaled = model(last_seq_torch)
         
+        # Inverse transform and clamp to position-specific max_nums
         prediction = scaler.inverse_transform(pred_scaled.cpu().numpy()).flatten()
-        # Clamp predictions
-        prediction = np.clip(np.round(prediction), 1, max_nums).astype(int)
+        prediction = np.round(prediction).astype(int)
+        for i in range(len(prediction)):
+            prediction[i] = np.clip(prediction[i], 1, max_nums[i])
+        
+        # Ensure unique predictions within position-specific bounds
         unique_preds = []
         seen = set()
         for i, p in enumerate(prediction):
             candidate = p
-            while candidate in seen:
+            attempts = 0
+            max_attempts = 100  # Prevent infinite loops
+            while candidate in seen and attempts < max_attempts:
                 candidate = np.random.randint(1, max_nums[i] + 1)
+                attempts += 1
+            if attempts >= max_attempts:
+                # Fallback: select a random unused number within max_nums[i]
+                available = list(set(range(1, max_nums[i] + 1)) - seen)
+                if available:
+                    candidate = np.random.choice(available)
+                else:
+                    candidate = np.random.randint(1, max_nums[i] + 1)  # Last resort
             unique_preds.append(candidate)
             seen.add(candidate)
         
         # Fill with random valid numbers if needed
         while len(unique_preds) < 6:
             pos_idx = len(unique_preds)
-            new_num = np.random.randint(1, max_nums[pos_idx] + 1)
-            while new_num in seen:
-                new_num = np.random.randint(1, max_nums[pos_idx] + 1)
+            available = list(set(range(1, max_nums[pos_idx] + 1)) - seen)
+            if available:
+                new_num = np.random.choice(available)
+            else:
+                new_num = np.random.randint(1, max_nums[pos_idx] + 1)  # Last resort
             unique_preds.append(new_num)
             seen.add(new_num)
         
-        # Error estimation based on prediction
+        # Error estimation based on training loss
         error = np.full(6, np.sqrt(best_loss) * 10)
         
         return {
@@ -338,14 +361,15 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
         if len(_df) < 2:
             raise ValueError("Insufficient data for Hilbert embedding")
         
-        # Use maximum of position-specific maxs for complex analysis
-        max_num = max(max_nums)
+        # Map numbers to complex plane, respecting position-specific max_nums
+        def to_complex(n, pos_idx):
+            return np.exp(1j * 2 * np.pi * n / max_nums[pos_idx])
         
-        # Map numbers to complex plane
-        def to_complex(n):
-            return np.exp(1j * 2 * np.pi * n / max_num)
+        # Create complex representation for each position
+        complex_df = pd.DataFrame()
+        for i, col in enumerate(_df.columns):
+            complex_df[col] = _df[col].apply(lambda x: to_complex(x, i))
         
-        complex_df = _df.apply(lambda x: to_complex(x))
         mean_vector = complex_df.mean(axis=1)
         
         # Extrapolate next mean vector
@@ -357,36 +381,37 @@ def analyze_hilbert_embedding(_df, max_nums=[49]*6):
         next_amp = max(1e-10, last_amp + amp_velocity)  # Avoid zero amplitude
         predicted_vector = next_amp * np.exp(1j * next_phase)
         
-        # Greedy approximation to find 6 numbers
-        all_nums = np.arange(1, max_num + 1)
-        all_complex = to_complex(all_nums)
+        # Greedy approximation to find 6 numbers within position-specific max_nums
         selected = []
-        remaining = set(range(len(all_complex)))
-        for _ in range(6):
+        seen = set()
+        for pos_idx in range(6):
             min_dist = np.inf
-            best_idx = None
-            current_sum = np.sum([all_complex[i] for i in selected]) / max(len(selected), 1)
-            for idx in remaining:
-                test_sum = (current_sum * len(selected) + all_complex[idx]) / (len(selected) + 1)
+            best_num = None
+            current_sum = np.sum([to_complex(n, i) for i, n in enumerate(selected)]) / max(len(selected), 1)
+            for num in range(1, max_nums[pos_idx] + 1):
+                if num in seen:
+                    continue
+                test_sum = (current_sum * len(selected) + to_complex(num, pos_idx)) / (len(selected) + 1)
                 dist = np.abs(test_sum - predicted_vector)
                 if dist < min_dist:
                     min_dist = dist
-                    best_idx = idx
-            if best_idx is not None:
-                selected.append(best_idx)
-                remaining.remove(best_idx)
+                    best_num = num
+            if best_num is None:
+                # Fallback: select a random unused number within max_nums[pos_idx]
+                available = list(set(range(1, max_nums[pos_idx] + 1)) - seen)
+                best_num = np.random.choice(available) if available else np.random.randint(1, max_nums[pos_idx] + 1)
+            selected.append(best_num)
+            seen.add(best_num)
         
-        # Map selected numbers to position-specific bounds
-        prediction = []
-        seen = set()
-        for i, num in enumerate(sorted(all_nums[selected])):
-            pos_max = max_nums[i]
-            candidate = min(num, pos_max)
-            while candidate in seen:
-                candidate = np.random.randint(1, pos_max + 1)
-            prediction.append(candidate)
-            seen.add(candidate)
+        # Ensure 6 numbers
+        while len(selected) < 6:
+            pos_idx = len(selected)
+            available = list(set(range(1, max_nums[pos_idx] + 1)) - seen)
+            new_num = np.random.choice(available) if available else np.random.randint(1, max_nums[pos_idx] + 1)
+            selected.append(new_num)
+            seen.add(new_num)
         
+        prediction = sorted(selected)
         error = np.full(6, min_dist * 10)
         
         return {
@@ -433,6 +458,7 @@ def run_full_backtest_suite(df, max_nums=[49]*6):
         for name, func in model_funcs.items():
             y_preds, y_trues = [], []
             for i in range(len(val_df)):
+                # Use historical data up to the current validation point (chronological order)
                 historical_df = df.iloc[:split_point + i]
                 pred = func(historical_df)['prediction']
                 if all(p == 0 for p in pred):  # Skip failed predictions
@@ -473,6 +499,7 @@ def analyze_predictive_maturity(df, model_type='LSTM', max_nums=[49]*6):
         total_steps = len(history_sizes)
         
         for idx, size in enumerate(history_sizes):
+            # Use chronological subset: first size draws
             subset_df = df.iloc[:size]
             if len(subset_df) < 50:
                 continue
@@ -549,7 +576,7 @@ if uploaded_file:
         st.session_state.data_warning = None
 
     if not df_master.empty and df_master.shape[1] == 6:
-        st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws.")
+        st.sidebar.success(f"Loaded and validated {len(df_master)} historical draws (most recent at the end).")
         
         tab1, tab2, tab3 = st.tabs(["🔮 Predictive Analytics", "🔬 System Dynamics Explorer", "🧠 Predictive Maturity"])
 
@@ -840,7 +867,7 @@ if uploaded_file:
 
                 **Actionability**:
                 - **Chaotic System (Positive Lyapunov)**:
-                  - **Action**: Avoid cycle-based predictions due to sensitivity to initial conditions. Use Tab 1 models (LSTM, GRU, Hilbert Embedding) for robust forecasts, as they capture non-linear patterns.
+                  - **Action**: Avoid cycle-based predictions due to sensitivity to initial conditions. Use Tab 1 predictions (LSTM/GRU/Hilbert) for robust forecasts, as they capture non-linear patterns.
                   - **Practical Steps**: Run the Predictive Analytics tab and select the highest-likelihood model (based on backtesting scores).
                   - **Next Steps**: Focus on Tab 1 results and monitor prediction accuracy in Tab 3 (Predictive Maturity) to assess model reliability.
                 - **Stable/Periodic System (Non-positive Lyapunov)**:
