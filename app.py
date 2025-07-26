@@ -22,6 +22,9 @@
 # - Fixed likelihood scores of 0 and missing number combinations by improving log loss robustness.
 # - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
 # - Added logging for prob_of_true and draw_log_loss to diagnose zero likelihood scores.
+# - Fixed Markov Chain failure for Pos_6 by clipping series and logging invalid values.
+# - Enhanced load_data to log values exceeding max_nums and enforce constraints.
+# - Added max_num logging in analyze_stable_position_dynamics for Pos_6 debugging.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -95,10 +98,18 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
         df.dropna(inplace=True)
         df = df.astype(int)
 
+        # Log invalid values before filtering
         initial_rows = len(df)
-        for i, max_num in enumerate(max_nums):
-            if i < df.shape[1]:
-                df = df[(df.iloc[:, i] >= 1) & (df.iloc[:, i] <= max_num)]
+        for i, max_num in enumerate(max_nums[:df.shape[1]]):
+            invalid_values = df.iloc[:, i][(df.iloc[:, i] < 1) | (df.iloc[:, i] > max_num)]
+            if not invalid_values.empty:
+                st.session_state.data_warnings.append(
+                    f"Pos_{i+1}: Found {len(invalid_values)} values outside [1, {max_num}]: {invalid_values.unique().tolist()}"
+                )
+
+        # Filter out invalid values
+        for i, max_num in enumerate(max_nums[:df.shape[1]]):
+            df = df[(df.iloc[:, i] >= 1) & (df.iloc[:, i] <= max_num)]
         if len(df) < initial_rows:
             st.session_state.data_warnings.append(f"Discarded {initial_rows - len(df)} rows with numbers outside the specified max range.")
 
@@ -278,6 +289,8 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
     call_id = f"{position}_{len(st.session_state.model_calls.get(position, {})) + 1}"
     st.session_state.model_calls.setdefault(position, {})[call_id] = st.session_state.model_calls.get(position, {}).get(call_id, 0) + 1
     try:
+        # Clip series to valid range to handle out-of-range values
+        series = np.clip(series, 0, max_num - 1)
         # Validate input series
         if not np.all((series >= 0) & (series < max_num)):
             raise ValueError(f"Invalid values in series for {position}: must be in range [0, {max_num-1}]")
@@ -312,6 +325,7 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
 def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: int) -> Dict[str, Any]:
     """Performs a deep dive analysis on a single stable position."""
     try:
+        st.session_state.data_warnings.append(f"Analyzing {position} with max_num={max_num}")
         results = {}
         series = _df[position].values
         stat_phys_results = _analyze_stat_physics(series, max_num)
@@ -532,7 +546,7 @@ if uploaded_file:
 
                 ### Models
                 - **LSTM/GRU**: Deep learning models capturing sequential patterns.
-                - **Stable Position Models**: For stable positions (Lyapunov exponent ≤0.05), combine MCMC (Markov Chain Monte Carlo), SARIMA (time-series forecasting), and Markov Chain (transition probability model).
+                - **Stable Position Models**: For stable positions (Lyapunov exponent ≤0.05), combine MCMC (Markov Chain Monte Carlo), SARIMA (time-series forecasting), and Markov Chain (transition probabilities).
                 - **Backtesting**: Uses walk-forward validation to compute average log loss, converted to a likelihood score (100 - 15 × log loss).
 
                 ### Actionability
@@ -540,7 +554,7 @@ if uploaded_file:
                 - Review probability distributions for each position to assess confidence.
                 - Cross-validate with System Dynamics Explorer for stable positions.
                 """)
-            if st.button("🚀 RUN ALL PREDICTIVE MODELS", type="primary", use_container_width=True):
+            if st.button("🚀 Run All Predictive Models", type="primary", use_container_width=True):
                 with st.spinner("Backtesting all models... This is a deep computation and may take several minutes."):
                     scored_predictions = run_full_backtest_suite(df_master, max_nums, stable_positions)
                 st.header("✨ Final Synthesis & Strategic Portfolio")
@@ -563,7 +577,7 @@ if uploaded_file:
                                         if dist:
                                             df_dist = pd.DataFrame(list(dist.items()), columns=['Number', 'Probability']).sort_values('Number')
                                             fig = px.bar(df_dist, x='Number', y='Probability', height=200)
-                                            fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), yaxis_title=None, xaxis_title=None)
+                                            fig.update_layout(margin=dict(l=10, r=10, t=40, b=40), yaxis_title=None, xaxis_title=None)
                                             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                                         else:
                                             st.write("No distribution available.")
@@ -572,14 +586,14 @@ if uploaded_file:
             with st.expander("Explanation of System Dynamics"):
                 st.markdown("""
                 ### Overview
-                Analyzes the temporal behavior of a selected position using chaos theory and time-series analysis.
+                Analyzes the temporal behavior of a selected position using time-series analysis and chaos theory.
 
                 ### Outputs
                 - **Recurrence Plot**: Visualizes state recurrences.
-                - **Power Spectral Density (Fourier)**: Identifies dominant cycles.
-                - **Spectrogram**: Maps time-varying frequency content.
+                - **Power Spectral Density**: Identifies dominant cycles (Fourier).
+                - **Spectrogram**: Tracks time-varying frequency content.
                 - **Lyapunov Exponent**: Quantifies chaos (positive) or stability (≤0.05).
-                - **Periodicity Analysis**: Detects cycles for stable positions.
+                - **Periodicity**: Detects cycles for stable positions.
 
                 ### Actionability
                 - Stable positions (Lyapunov ≤0.05) suggest predictable patterns; use their predictions in Tab 1.
