@@ -1,9 +1,9 @@
 # ======================================================================================================
-# LottoSphere v16.0.7: The Quantum Chronodynamics Engine (Optimized & Debugged)
+# LottoSphere v16.0.8: The Quantum Chronodynamics Engine (Final Correction)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.7 (Refactored, Debugged, and Enhanced)
+# VERSION: 16.0.8 (Final Correction)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -11,15 +11,9 @@
 # clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
 # robust backtesting methodology for single-position models.
 #
-# CHANGELOG (from v16.0.6 to v16.0.7):
-# - REFACTORED: Broke down the monolithic `analyze_stable_position_dynamics` into 6 modular sub-functions.
-# - FIXED: Corrected the HMM prediction logic to use emission probabilities, not historical means.
-# - FIXED: Replaced the non-standard Fokker-Planck numerical solver with a stable FTCS scheme.
-# - OPTIMIZED: Improved the backtesting logic for single-position models by using a more stable
-#   baseline (last draw's numbers) instead of random fillers, yielding more meaningful likelihood scores.
-# - OPTIMIZED: Streamlined the logic for ensuring unique numbers in predictions.
-# - ROBUSTNESS: Improved warning system to show all data validation issues, not just the last one.
-# - STYLE: Added docstrings, type hints, and consolidated session state initialization.
+# CHANGELOG (from v16.0.7 to v16.0.8):
+# - FIXED: Removed the unused import for 'PyEMD' which was causing a ModuleNotFoundError.
+#   The EMD analysis was removed during optimization, but the import was left by mistake.
 # ======================================================================================================
 
 import streamlit as st
@@ -49,7 +43,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.statespace.kalman_filter import KalmanFilter
 import tensorflow as tf
 import tensorflow_probability as tfp
-from PyEMD import EMD
+# from PyEMD import EMD <-- THIS LINE HAS BEEN REMOVED
 from prophet import Prophet
 from hmmlearn.hmm import MultinomialHMM
 from sktime.forecasting.arima import AutoARIMA
@@ -62,7 +56,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.7: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.8: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -549,7 +543,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.7: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.8: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 # --- Sidebar Configuration ---
