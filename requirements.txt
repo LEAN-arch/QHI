@@ -10,5 +10,4 @@ statsmodels
 tensorflow-probability[tf]
 prophet
 hmmlearn
-sktime
 torch
