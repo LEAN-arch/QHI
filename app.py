@@ -1,9 +1,9 @@
 # ======================================================================================================
-# LottoSphere v16.0.8: The Quantum Chronodynamics Engine (Final Correction)
+# LottoSphere v16.0.9: The Quantum Chronodynamics Engine (Final Correction)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.8 (Final Correction)
+# VERSION: 16.0.9 (Final Correction)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
@@ -11,9 +11,9 @@
 # clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
 # robust backtesting methodology for single-position models.
 #
-# CHANGELOG (from v16.0.7 to v16.0.8):
-# - FIXED: Removed the unused import for 'PyEMD' which was causing a ModuleNotFoundError.
-#   The EMD analysis was removed during optimization, but the import was left by mistake.
+# CHANGELOG (from v16.0.8 to v16.0.9):
+# - FIXED: Removed the unused import for 'sktime.annotation.adapters.PyODAnnotator'.
+#   The change-point detection feature was removed during optimization, but the import was left by mistake.
 # ======================================================================================================
 
 import streamlit as st
@@ -43,11 +43,10 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.statespace.kalman_filter import KalmanFilter
 import tensorflow as tf
 import tensorflow_probability as tfp
-# from PyEMD import EMD <-- THIS LINE HAS BEEN REMOVED
 from prophet import Prophet
 from hmmlearn.hmm import MultinomialHMM
 from sktime.forecasting.arima import AutoARIMA
-from sktime.annotation.adapters import PyODAnnotator
+# from sktime.annotation.adapters import PyODAnnotator # <-- THIS LINE HAS BEEN REMOVED
 
 # --- Deep Learning (PyTorch) ---
 import torch
@@ -56,7 +55,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.8: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.9: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -543,7 +542,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.8: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.9: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 # --- Sidebar Configuration ---
