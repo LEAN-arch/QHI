@@ -8,7 +8,7 @@ scipy
 nolds
 statsmodels
 tensorflow-probability[tf]
-PyEMD
+emd
 prophet
 hmmlearn
 sktime
