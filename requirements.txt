@@ -10,7 +10,7 @@ matplotlib==3.8.4
 scikit-learn==1.5.0 
 umap-learn==0.5.6 
 hdbscan==0.8.33 
-pywt==1.5.0 
+pywt==1.4.1 
 scipy==1.13.1 
 nolds==0.5.2 
 statsmodels==0.14.2 
