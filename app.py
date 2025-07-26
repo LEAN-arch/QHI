@@ -805,7 +805,7 @@ if uploaded_file:
                                     mode='markers',
                                     hoverinfo='text',
                                     hovertext=node_text,
-                                    marker=dict(color=node_color, size=node_size, line_width=2')
+                                    marker=dict(color=node_color, size=node_size, line_width=2)
                                 )
                                 fig = go.Figure(
                                     data=[edge_trace, node_trace],
