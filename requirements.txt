@@ -7,8 +7,7 @@ scikit-learn
 scipy
 nolds
 statsmodels
-tensorflow
-tensorflow-probability
+tensorflow-probability[tf]
 PyEMD
 prophet
 hmmlearn
