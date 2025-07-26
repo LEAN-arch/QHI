@@ -18,6 +18,7 @@
 # - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
 # - Restored HMM attribute fix ('emissionprob_' to 'emissionprobs_') and improved HMM call logging.
 # - Added cache-clearing mechanism to ensure updated code execution.
+# - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models by defining it outside try block.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -257,9 +258,12 @@ def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[
     """Sub-module for Machine Learning analysis."""
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
+    call_id = f"{position}_{len(st.session_state.hmm_calls.get(position, {})) + 1}"
+    st.session_state.hmm_calls.setdefault(position, {})[call_id] = st.session_state.hmm_calls.get(position, {}).get(call_id, 0) + 1
     try:
-        call_id = f"{position}_{len(st.session_state.hmm_calls) + 1}"
-        st.session_state.hmm_calls[call_id] = st.session_state.hmm_calls.get(call_id, 0) + 1
+        # Validate input series
+        if not np.all((hmm_series >= 0) & (hmm_series < max_num)):
+            raise ValueError(f"Invalid values in series for {position}: must be in range [0, {max_num-1}]")
         hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
         hmm.fit(hmm_series)
         last_state = hmm.predict(hmm_series)[-1]
@@ -424,7 +428,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
             scored_predictions.append(final_pred_obj)
         progress_bar.empty()
-        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {sum(st.session_state.hmm_calls.values())}")
+        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {sum([sum(calls.values()) for calls in st.session_state.hmm_calls.values()])}")
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
     except Exception as e:
         st.error(f"Error in backtesting suite: {e}")
@@ -519,10 +523,10 @@ if uploaded_file:
                 """)
             position = st.selectbox("Select Position to Analyze", options=df_master.columns, index=0)
             if st.button(f"Analyze Dynamics for {position}", use_container_width=True):
-                with st.spinner("Analyzing dynamics for {position}..."):
+                with st.spinner(f"Analyzing dynamics for {position}..."):
                     dynamic_results = analyze_temporal_behavior(df_master, position=position)
                 if dynamic_results:
-                    st.subheader("Chaotic & Cyclical Analysis ({position})")
+                    st.subheader(f"Chaotic & Cyclical Analysis ({position})")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.plotly_chart(dynamic_results.get('recurrence_fig'), use_container_width=True)
@@ -536,7 +540,7 @@ if uploaded_file:
                             st.success(f"**Lyapunov Exponent:** {dynamic_results['lyapunov']:.4f}. System is stable.", icon="✅")
                             if dynamic_results.get('periodicity_description'):
                                 st.info(f"**Periodicity Analysis:** {dynamic_results['periodicity_description']}", icon="🔄")
-                                st.plotly_chart(dynamic_results.get('acf_fig'), use_container=True)
+                                st.plotly_chart(dynamic_results.get('acf_fig'), use_container_width=True)
                     else:
                         st.warning("Lyapunov exponent calculation failed.")
 else:
