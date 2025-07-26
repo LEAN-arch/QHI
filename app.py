@@ -16,7 +16,8 @@
 # - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
 # - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
 # - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
-# - Restored HMM attribute fix ('emissionprob_' to 'emissionprobs_') and added logging for HMM calls.
+# - Restored HMM attribute fix ('emissionprob_' to 'emissionprobs_') and improved HMM call logging.
+# - Added cache-clearing mechanism to ensure updated code execution.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -31,6 +32,7 @@ import matplotlib.pyplot as plt
 import warnings
 from typing import List, Dict, Any, Tuple, Optional
 import scipy.stats as stats
+import os
 
 # --- Suppress Warnings for a Cleaner UI ---
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -60,11 +62,19 @@ st.set_page_config(
 if 'data_warnings' not in st.session_state:
     st.session_state.data_warnings = []
 if 'hmm_calls' not in st.session_state:
-    st.session_state.hmm_calls = 0
+    st.session_state.hmm_calls = {}
+if 'cache_cleared' not in st.session_state:
+    st.session_state.cache_cleared = False
 
 np.random.seed(42)
 torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# --- Clear Streamlit Cache ---
+if not st.session_state.cache_cleared:
+    st.cache_data.clear()
+    st.session_state.cache_cleared = True
+    st.session_state.data_warnings.append("Streamlit cache cleared to ensure updated code execution.")
 
 # ====================================================================================================
 # ALL FUNCTION DEFINITIONS
@@ -243,12 +253,13 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     results['fokker_planck_dist'] = {int(num): prob for num, prob in zip(x, p)}
     return results
 
-def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
+def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
     hmm_series = (series - 1).reshape(-1, 1)
     try:
-        st.session_state.hmm_calls += 1
+        call_id = f"{position}_{len(st.session_state.hmm_calls) + 1}"
+        st.session_state.hmm_calls[call_id] = st.session_state.hmm_calls.get(call_id, 0) + 1
         hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
         hmm.fit(hmm_series)
         last_state = hmm.predict(hmm_series)[-1]
@@ -256,12 +267,12 @@ def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
         # Use correct attribute name for hmmlearn==0.3.2
         emission_probs = getattr(hmm, 'emissionprobs_', None)
         if emission_probs is None:
-            st.warning(f"HMM emission probabilities not available (call {st.session_state.hmm_calls}).")
+            st.warning(f"HMM emission probabilities not available for {position} (call {call_id}).")
             results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
         else:
             results['hmm_dist'] = {i+1: p for i, p in enumerate(emission_probs[next_state]) if 1 <= i+1 <= max_num}
     except Exception as e:
-        st.warning(f"HMM model failed (call {st.session_state.hmm_calls}): {e}")
+        st.warning(f"HMM model failed for {position} (call {call_id}): {e}")
         results['hmm_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
     return results
 
@@ -286,7 +297,7 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         except Exception:
             st.warning(f"SARIMA model failed for {position}.")
             results['sarima_dist'] = {i: 1/max_num for i in range(1, max_num + 1)}
-        ml_results = _analyze_ml_models(series, max_num)
+        ml_results = _analyze_ml_models(series, max_num, position)
         results.update(ml_results)
         all_dists = [results.get('mcmc_dist', {}), results.get('sarima_dist', {}), results.get('hmm_dist', {})]
         ensemble_dist = {i: 0.0 for i in range(1, max_num + 1)}
@@ -413,7 +424,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
             scored_predictions.append(final_pred_obj)
         progress_bar.empty()
-        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {st.session_state.hmm_calls}")
+        st.session_state.data_warnings.append(f"Total HMM calls during backtest: {sum(st.session_state.hmm_calls.values())}")
         return sorted(scored_predictions, key=lambda x: x.get('likelihood', 0), reverse=True)
     except Exception as e:
         st.error(f"Error in backtesting suite: {e}")
@@ -508,10 +519,10 @@ if uploaded_file:
                 """)
             position = st.selectbox("Select Position to Analyze", options=df_master.columns, index=0)
             if st.button(f"Analyze Dynamics for {position}", use_container_width=True):
-                with st.spinner(f"Analyzing dynamics for {position}..."):
+                with st.spinner("Analyzing dynamics for {position}..."):
                     dynamic_results = analyze_temporal_behavior(df_master, position=position)
                 if dynamic_results:
-                    st.subheader(f"Chaotic & Cyclical Analysis ({position})")
+                    st.subheader("Chaotic & Cyclical Analysis ({position})")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.plotly_chart(dynamic_results.get('recurrence_fig'), use_container_width=True)
@@ -525,7 +536,7 @@ if uploaded_file:
                             st.success(f"**Lyapunov Exponent:** {dynamic_results['lyapunov']:.4f}. System is stable.", icon="✅")
                             if dynamic_results.get('periodicity_description'):
                                 st.info(f"**Periodicity Analysis:** {dynamic_results['periodicity_description']}", icon="🔄")
-                                st.plotly_chart(dynamic_results.get('acf_fig'), use_container_width=True)
+                                st.plotly_chart(dynamic_results.get('acf_fig'), use_container=True)
                     else:
                         st.warning("Lyapunov exponent calculation failed.")
 else:
