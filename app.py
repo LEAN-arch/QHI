@@ -1,7 +1,7 @@
 # ======================================================================================================
-# LottoSphere v17.0.2: The Quantum Chronodynamics Engine (Final Corrected)
+# LottoSphere v17.0.3: The Quantum Chronodynamics Engine (Final Corrected)
 #
-# VERSION: 17.0.2 (Final Corrected)
+# VERSION: 17.0.3 (Final Corrected)
 #
 # DESCRIPTION:
 # This is the final, stable, and feature-complete version of the application, incorporating
@@ -11,20 +11,18 @@
 # and robust error handling for stable operation.
 #
 # CHANGELOG:
-# - v17.0.2: Removed tensorflow dependencies, simplified to PyTorch, added probabilistic forecasting.
-# - Fixed streamlit-rich conflict, removed pywt, added robust error handling.
-# - Fixed HMM attribute error ('emissionprob_' to 'emissionprobs_') for hmmlearn==0.3.2.
-# - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior' in main logic.
-# - Fixed syntax error in MultinomialHMM ('params nonin' to 'params') in _analyze_ml_models.
-# - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models by defining it outside try block.
-# - Replaced MultinomialHMM with Markov Chain model in _analyze_ml_models due to hmmlearn incompatibility.
-# - Removed hmmlearn dependency from requirements.txt.
-# - Fixed likelihood scores of 0 and missing number combinations by improving log loss robustness.
-# - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
-# - Added logging for prob_of_true and draw_log_loss to diagnose zero likelihood scores.
+# - v17.0.3: Fixed incomplete number sets in get_best_guess_set by ensuring six numbers.
+# - Added validation in run_full_backtest_suite to filter invalid predictions.
+# - Enhanced logging for model failures, distributions, and max_nums usage.
 # - Fixed Markov Chain failure for Pos_6 by clipping series and logging invalid values.
 # - Enhanced load_data to log values exceeding max_nums and enforce constraints.
 # - Added max_num logging in analyze_stable_position_dynamics for Pos_6 debugging.
+# - Fixed likelihood scores of 0 and missing number combinations by improving log loss robustness.
+# - Fixed SyntaxError in run_full_backtest_suite (float1e-10 to float(1e-10)).
+# - Replaced MultinomialHMM with Markov Chain model in _analyze_ml_models.
+# - Removed hmmlearn dependency from requirements.txt.
+# - Fixed typo 'analyze_teminal_behavior' to 'analyze_temporal_behavior'.
+# - Fixed UnboundLocalError for 'call_id' in _analyze_ml_models.
 # - Ensured predictions respect max_nums and temporal CSV order (last rows as recent draws).
 # ======================================================================================================
 
@@ -61,7 +59,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v17.0.2: Quantum Chronodynamics",
+    page_title="LottoSphere v17.0.3: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -93,6 +91,7 @@ def load_data(uploaded_file: io.BytesIO, max_nums: List[int]) -> pd.DataFrame:
     try:
         df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
         st.session_state.data_warnings = []
+        st.session_state.data_warnings.append(f"Loaded CSV with {len(df)} rows and {df.shape[1]} columns. max_nums={max_nums}")
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         df.dropna(inplace=True)
@@ -158,10 +157,10 @@ def create_sequences(data: np.ndarray, seq_length: int) -> Tuple[np.ndarray, np.
     return np.array(xs), np.array(ys)
 
 def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int]) -> List[int]:
-    """Extracts a unique set of numbers from the modes of probability distributions."""
+    """Extracts a unique set of six numbers from the modes of probability distributions."""
     best_guesses = []
     seen = set()
-    for i, dist in enumerate(distributions):
+    for i, dist in enumerate(distributions[:6]):  # Ensure exactly 6 positions
         if not dist or not all(isinstance(p, (int, float)) and p >= 0 for p in dist.values()):
             st.session_state.data_warnings.append(f"Invalid distribution for Pos_{i+1}. Using uniform distribution.")
             dist = {j: 1/max_nums[i] for j in range(1, max_nums[i] + 1)}
@@ -172,7 +171,7 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
         else:
             dist = {k: v/total_prob for k, v in dist.items()}
         sorted_dist = sorted(dist.items(), key=lambda item: item[1], reverse=True)
-        for num, _ in sorted_dist:
+        for num, prob in sorted_dist:
             if num not in seen and 1 <= num <= max_nums[i]:
                 best_guesses.append(num)
                 seen.add(num)
@@ -186,7 +185,19 @@ def get_best_guess_set(distributions: List[Dict[int, float]], max_nums: List[int
             else:
                 guess = np.random.randint(1, max_nums[i] + 1)
                 best_guesses.append(guess)
-    return sorted(best_guesses)
+                seen.add(guess)
+    # Ensure exactly 6 numbers
+    while len(best_guesses) < 6:
+        for i in range(6):
+            if len(best_guesses) >= 6:
+                break
+            available = set(range(1, max_nums[i] + 1)) - seen
+            if available:
+                guess = np.random.choice(list(available))
+                best_guesses.append(guess)
+                seen.add(guess)
+    st.session_state.data_warnings.append(f"Generated best guess set: {best_guesses}")
+    return sorted(best_guesses[:6])
 
 # --- 3. TIME-DEPENDENT BEHAVIOR ANALYSIS MODULE ---
 @st.cache_data
@@ -285,11 +296,15 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
 def _analyze_ml_models(series: np.ndarray, max_num: int, position: str) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
+    st.session_state.data_warnings.append(f"Running Markov Chain for {position} with max_num={max_num}")
     series = series - 1  # Adjust to 0-based indexing
     call_id = f"{position}_{len(st.session_state.model_calls.get(position, {})) + 1}"
     st.session_state.model_calls.setdefault(position, {})[call_id] = st.session_state.model_calls.get(position, {}).get(call_id, 0) + 1
     try:
-        # Clip series to valid range to handle out-of-range values
+        # Clip series to valid range
+        invalid_values = series[(series < 0) | (series >= max_num)]
+        if invalid_values.size > 0:
+            st.session_state.data_warnings.append(f"Pos_{position}: Clipping {len(invalid_values)} invalid values: {invalid_values.tolist()}")
         series = np.clip(series, 0, max_num - 1)
         # Validate input series
         if not np.all((series >= 0) & (series < max_num)):
@@ -420,6 +435,7 @@ def predict_torch_model(_df: pd.DataFrame, _model_cache: Tuple, model_type: str,
             prob_mass = np.clip(prob_mass, 1e-6, None)
             prob_mass /= prob_mass.sum()
             distributions.append({int(num): prob for num, prob in zip(x_range, prob_mass)})
+        st.session_state.data_warnings.append(f"{model_type} prediction: {prediction_raw.tolist()}")
         return {'name': model_type, 'distributions': distributions, 'logic': f'Deep learning {model_type} sequence forecast.'}
     except Exception as e:
         st.warning(f"Prediction with {model_type} failed: {e}")
@@ -445,6 +461,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
         if stable_positions:
             for pos in stable_positions:
                 model_funcs[f'Stable_{pos}'] = lambda d, p=pos: analyze_stable_position_dynamics(d, p, max_nums[int(p.split("_")[1])-1])
+        st.session_state.data_warnings.append(f"Initialized models: {list(model_funcs.keys())}")
         progress_bar = st.progress(0, text="Backtesting models...")
         total_steps = len(val_df) * len(model_funcs)
         current_step = 0
@@ -454,8 +471,8 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                 try:
                     historical_df = _df.iloc[:split_point + i]
                     pred_obj = func(historical_df)
-                    if not pred_obj or not pred_obj.get('distributions') or not all(isinstance(d, dict) for d in pred_obj['distributions']):
-                        st.session_state.data_warnings.append(f"Model {name} failed to produce valid distributions for draw {i}")
+                    if not pred_obj or not pred_obj.get('distributions') or not all(isinstance(d, dict) for d in pred_obj['distributions']) or len(pred_obj['distributions']) != 6:
+                        st.session_state.data_warnings.append(f"Model {name} failed to produce valid distributions for draw {i}: {pred_obj}")
                         continue
                     y_true = val_df.iloc[i].values
                     draw_log_loss = 0
@@ -486,8 +503,8 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
             likelihood = max(0, 100 - avg_log_loss * 15)
             try:
                 final_pred_obj = func(_df)
-                if not final_pred_obj or not final_pred_obj.get('distributions') or not all(isinstance(d, dict) for d in final_pred_obj['distributions']):
-                    st.session_state.data_warnings.append(f"Final prediction failed for {name}")
+                if not final_pred_obj or not final_pred_obj.get('distributions') or not all(isinstance(d, dict) for d in final_pred_obj['distributions']) or len(final_pred_obj['distributions']) != 6:
+                    st.session_state.data_warnings.append(f"Final prediction failed for {name}: {final_pred_obj}")
                     final_pred_obj = {
                         'name': name,
                         'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in max_nums],
@@ -496,6 +513,12 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
                 final_pred_obj['likelihood'] = likelihood
                 final_pred_obj['metrics'] = {'Avg Log Loss': f"{avg_log_loss:.3f}"}
                 final_pred_obj['prediction'] = get_best_guess_set(final_pred_obj['distributions'], max_nums)
+                if len(final_pred_obj['prediction']) != 6:
+                    st.session_state.data_warnings.append(f"Invalid prediction set for {name}: {final_pred_obj['prediction']}")
+                    continue
+                if final_pred_obj.get('name', 'Unknown Model') == 'Unknown Model':
+                    st.session_state.data_warnings.append(f"Skipping invalid model name for {name}")
+                    continue
                 scored_predictions.append(final_pred_obj)
             except Exception as e:
                 st.session_state.data_warnings.append(f"Error in final prediction for {name}: {e}")
@@ -512,7 +535,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # ====================================================================================================
 # Main Application UI & Logic
 # ====================================================================================================
-st.title("⚛️ LottoSphere v17.0.2: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v17.0.3: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis, now upgraded with **probabilistic forecasting**.")
 
 st.sidebar.header("Configuration")
