@@ -1,20 +1,20 @@
 # ======================================================================================================
-# LottoSphere v16.0.13: The Quantum Chronodynamics Engine (Final)
+# LottoSphere v16.0.14: The Quantum Chronodynamics Engine (Final Stable)
 #
 # AUTHOR: Subject Matter Expert AI (Stochastic Systems, Predictive Dynamics & Complex Systems)
 # DATE: 2025-07-26
-# VERSION: 16.0.13 (Final)
+# VERSION: 16.0.14 (Final Stable)
 #
 # DESCRIPTION:
 # A professional-grade scientific instrument for analyzing high-dimensional, chaotic time-series
-# data, framed around lottery number sets. This version includes significant refactoring for
-# clarity, bug fixes in scientific model implementations (HMM, Fokker-Planck), and a more
-# robust backtesting methodology for single-position models.
+# data, framed around lottery number sets. This version is stabilized by removing the problematic
+# Bayesian Neural Network model to resolve deep dependency conflicts.
 #
-# CHANGELOG (from v16.0.12 to v16.0.13):
-# - FIXED: Corrected an AttributeError ('numpy.ndarray' object has no attribute 'iloc') by
-#   changing the indexer for the AutoARIMA prediction from .iloc[0] to [0] to match the
-#   output type of the current library version.
+# CHANGELOG (from v16.0.13 to v16.0.14):
+# - REMOVED: The Bayesian Neural Network (BNN) model and its dependencies (tensorflow, 
+#   tensorflow-probability) have been completely removed to resolve a critical Keras version conflict.
+# - FIXED: Corrected the AttributeError for the AutoARIMA prediction by using the correct
+#   NumPy indexer `[0]` instead of the incorrect Pandas indexer `.iloc[0]`.
 # ======================================================================================================
 
 import streamlit as st
@@ -42,8 +42,6 @@ from nolds import lyap_r
 from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.statespace.kalman_filter import KalmanFilter
-import tensorflow as tf
-import tensorflow_probability as tfp
 from prophet import Prophet
 from hmmlearn.hmm import MultinomialHMM
 from sktime.forecasting.arima import AutoARIMA
@@ -55,7 +53,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # --- 1. APPLICATION CONFIGURATION & INITIALIZATION ---
 st.set_page_config(
-    page_title="LottoSphere v16.0.13: Quantum Chronodynamics",
+    page_title="LottoSphere v16.0.14: Quantum Chronodynamics",
     page_icon="⚛️",
     layout="wide",
 )
@@ -66,7 +64,6 @@ if 'data_warnings' not in st.session_state:
 # Set seeds for reproducibility
 np.random.seed(42)
 torch.manual_seed(42)
-tf.random.set_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ====================================================================================================
@@ -236,23 +233,11 @@ def _analyze_stat_physics(series: np.ndarray, max_num: int) -> Dict[str, Any]:
 
     return results
 
-def _analyze_ml_models(series: np.ndarray, max_num: int, seq_length: int = 3) -> Dict[str, Any]:
+def _analyze_ml_models(series: np.ndarray, max_num: int) -> Dict[str, Any]:
     """Sub-module for Machine Learning analysis."""
     results = {}
-    scaler = MinMaxScaler()
-    scaled_series = scaler.fit_transform(series.reshape(-1, 1))
-    X, y = create_sequences(scaled_series, seq_length)
-    bnn = tf.keras.Sequential([
-        tfp.layers.DenseVariational(32, activation='relu', make_posterior_fn=tfp.layers.default_mean_field_normal_fn(), make_prior_fn=tfp.layers.default_mean_field_normal_fn()),
-        tfp.layers.DenseVariational(1, make_posterior_fn=tfp.layers.default_mean_field_normal_fn(), make_prior_fn=tfp.layers.default_mean_field_normal_fn())
-    ])
-    bnn.compile(optimizer='adam', loss=lambda y_true, y_pred: -y_pred.log_prob(y_true))
-    bnn.fit(X, y, epochs=50, batch_size=16, verbose=0)
-    last_seq = scaled_series[-seq_length:].reshape(1, seq_length, 1)
-    bnn_pred_scaled = bnn(last_seq).mean().numpy().flatten()
-    bnn_pred = int(np.clip(np.round(scaler.inverse_transform(bnn_pred_scaled.reshape(-1, 1)).item()), 1, max_num))
-    results['bnn_pred'] = bnn_pred
 
+    # HMM Model
     hmm_series = (series - 1).reshape(-1, 1)
     hmm = MultinomialHMM(n_components=5, n_iter=100, tol=1e-3, params='st', init_params='st')
     hmm.fit(hmm_series)
@@ -288,7 +273,8 @@ def analyze_stable_position_dynamics(_df: pd.DataFrame, position: str, max_num: 
         hist, _ = np.histogram(series, bins=max_num, range=(1, max_num+1), density=True)
         results['shannon_entropy'] = -np.sum(hist * np.log2(hist + 1e-12))
 
-        preds = [results['mcmc_pred'], results['sarima_pred'], results['bnn_pred'], results['hmm_pred']]
+        # REMOVED: BNN prediction from ensemble
+        preds = [results['mcmc_pred'], results['sarima_pred'], results['hmm_pred']]
         fuzzy_pred = int(np.clip(np.round(np.mean(preds)), 1, max_num))
         results['fuzzy_pred'] = fuzzy_pred
 
@@ -518,7 +504,7 @@ def run_full_backtest_suite(_df: pd.DataFrame, max_nums: List[int], stable_posit
 # Main Application UI & Logic
 # ====================================================================================================
 
-st.title("⚛️ LottoSphere v16.0.13: Quantum Chronodynamics Engine")
+st.title("⚛️ LottoSphere v16.0.14: Quantum Chronodynamics Engine")
 st.markdown("A scientific instrument for exploratory analysis of high-dimensional, chaotic systems. Models each number position as an evolving system using advanced mathematical, AI, and statistical physics techniques.")
 
 st.sidebar.header("Configuration")
@@ -589,7 +575,7 @@ if uploaded_file:
                 - **Lyapunov Exponent**: A key metric from chaos theory.
                     - **Positive (> 0.05)**: The system is **chaotic** and unpredictable long-term.
                     - **Near-Zero or Negative**: The system is **stable** or periodic, making it more predictable.
-                - **Stable Position Analysis**: If a position is stable, additional models (MCMC, HMM, BNN) are run to provide targeted predictions.
+                - **Stable Position Analysis**: If a position is stable, additional models (MCMC, HMM, SARIMA) are run to provide targeted predictions.
                 """)
 
             if st.button(f"Analyze Dynamics for {position}", use_container_width=True):
@@ -623,11 +609,11 @@ if uploaded_file:
                         stable_results = analyze_stable_position_dynamics(df_master, position, max_nums[df_master.columns.get_loc(position)])
                     
                     if stable_results:
-                        pred_col1, pred_col2, pred_col3, pred_col4 = st.columns(4)
+                        # Removed BNN metric display
+                        pred_col1, pred_col2, pred_col3 = st.columns(3)
                         pred_col1.metric("MCMC Prediction", stable_results.get('mcmc_pred', 'N/A'))
                         pred_col2.metric("HMM Prediction", stable_results.get('hmm_pred', 'N/A'))
-                        pred_col3.metric("BNN Prediction", stable_results.get('bnn_pred', 'N/A'))
-                        pred_col4.metric("SARIMA Prediction", stable_results.get('sarima_pred', 'N/A'))
+                        pred_col3.metric("SARIMA Prediction", stable_results.get('sarima_pred', 'N/A'))
 
                         with st.expander("View Detailed Plots for Stable Analysis"):
                             st.plotly_chart(stable_results['mcmc_fig'], use_container_width=True)
