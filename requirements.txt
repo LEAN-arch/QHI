@@ -5,7 +5,7 @@ plotly==5.24.1
 scikit-learn==1.5.2
 scipy==1.14.1
 torch==2.4.1
-torchbnn==1.0.7
+torchbnn==1.2
 sktime==0.33.1
 hdbscan==0.8.38
 umap-learn==0.5.6
