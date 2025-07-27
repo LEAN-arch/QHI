@@ -1,30 +1,13 @@
-# Corrected, stable requirements.txt
-# Core Streamlit & Data Handling
-streamlit
-pandas
-numpy
-
-# Visualization
-plotly
-
-# Scientific & Statistical Computing
-scipy
-scikit-learn
-
-# Time Series, Forecasting & Other Models
-sktime
-pmdarima
-statsmodels
-hmmlearn
-
-# Machine Learning (Deep Learning & Bayesian)
-# Standard, robust torch installation
-torch
-torchbnn
-
-# Graph Theory
-networkx
-
-# Clustering & Dimensionality Reduction
-hdbscan
-umap-learn
+streamlit==1.39.0
+pandas==2.2.3
+numpy==1.26.4
+plotly==5.24.1
+scikit-learn==1.5.2
+scipy==1.14.1
+torch==2.4.1
+torchbnn==1.0.7
+sktime==0.33.1
+hdbscan==0.8.38
+umap-learn==0.5.6
+networkx==3.3
+hmmlearn==0.3.2
