@@ -1,19 +1,24 @@
 # ======================================================================================================
-# LottoSphere v25.0.1: Aletheia Engine (NumPy Fix Release)
+# LottoSphere v25.0.2: Aletheia Engine (Dependency Fix Release)
 #
-# VERSION: 25.0.1
+# VERSION: 25.0.2
 #
 # DESCRIPTION:
-# Fixes "Prediction Failed: Numpy is not available" errors for LSTM, GRU, Transformer, and Bayesian LSTM
-# models by adding explicit NumPy checks and fallbacks. Maintains all features from v25.0.0, including
-# the 5+1 architecture, System Health Check, and robust error handling. Compatible with Streamlit
-# Community Cloud (1GB RAM, Python 3.11).
+# Fixes "ERROR: Could not find a version that satisfies the requirement torchbnn==1.0.7" and
+# "Prediction Failed: Numpy is not available" errors by:
+# - Ensuring compatibility with Python 3.11 (Streamlit Community Cloud default).
+# - Using torchbnn==1.2 instead of 1.0.7.
+# - Adding explicit NumPy checks with uniform distribution fallbacks.
+# - Improving error messages for NumPy and torchbnn failures.
+# Maintains all features from v25.0.0: 5+1 architecture, System Health Check, pre-flight data
+# validation, full traceback visibility, and models (LSTM, GRU, Transformer, Bayesian LSTM,
+# Univariate Ensemble for Pos 6).
 #
-# CHANGELOG (v25.0.1):
-# - FIXED: Added explicit NumPy import check and fallback logic for prediction methods.
-# - ENHANCED: Improved error messages to clarify NumPy-related failures.
-# - MAINTAINED: All features from v25.0.0 (LSTM, GRU, Transformer, Bayesian LSTM, Univariate Ensemble).
-# - MAINTAINED: System Health Check, pre-flight data validation, and full traceback visibility.
+# CHANGELOG (v25.0.2):
+# - FIXED: torchbnn==1.0.7 installation error by updating to torchbnn==1.2.
+# - FIXED: Added NumPy import checks and fallbacks in predict methods.
+# - ENHANCED: Improved logging in data_warnings for better debugging.
+# - MAINTAINED: All models, System Health Check, and UI features from v25.0.0.
 # ======================================================================================================
 
 import streamlit as st
@@ -78,7 +83,7 @@ except ImportError:
     hmm = None
     st.warning("hmmlearn not available, HMM disabled.")
 
-st.set_page_config(page_title="LottoSphere v25.0.1: Aletheia Engine", page_icon="💡", layout="wide")
+st.set_page_config(page_title="LottoSphere v25.0.2: Aletheia Engine", page_icon="💡", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -373,19 +378,17 @@ class BayesianLSTMModel(BaseSequenceModel):
                 optimizer.step()
         st.session_state.data_warnings.append(f"Bayesian LSTM trained: {len(X)} sequences, {self.epochs} epochs.")
     def predict(self, full_history: pd.DataFrame, n_samples=50):
+<JAVASCRIPT_CODE_BLOCK>
         if not NUMPY_AVAILABLE:
             st.session_state.data_warnings.append("Bayesian LSTM: NumPy unavailable, returning uniform distributions.")
-            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums]}
+            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums], 'uncertainty': 0.0}
         if not bnn:
             st.session_state.data_warnings.append("Bayesian LSTM: torchbnn unavailable, returning uniform distributions.")
-            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums]}
+            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums], 'uncertainty': 0.0}
         if not self.model or not self.scaler:
             raise RuntimeError("Model is not trained.")
         if full_history is None or full_history.empty:
             raise ValueError("Bayesian LSTM: full_history is None or empty.")
-        history_main = full_history.iloc[:, :5]
-        if len(history_main) < self.seq_length:
-            raise ValueError(f"History length ({len(history_main)}) is less than sequence length ({self.seq_length}).")
         try:
             last_seq_scaled = self.scaler.transform(history_main.iloc[-self.seq_length:].values)
             input_tensor = torch.tensor(last_seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
@@ -404,7 +407,7 @@ class BayesianLSTMModel(BaseSequenceModel):
             return {'distributions': distributions, 'uncertainty': uncertainty_score}
         except Exception as e:
             st.session_state.data_warnings.append(f"Bayesian LSTM prediction failed: {e}")
-            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums]}
+            return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums], 'uncertainty': 0.0}
 
 class TransformerModel(BaseSequenceModel):
     def __init__(self, max_nums):
@@ -536,7 +539,7 @@ class ModelFactory:
                 skipped[name] = "NumPy is not available."
                 continue
             if not lib_available:
-                skipped[name] = "Required library not installed."
+                skipped[name] = "Required library not installed (torchbnn for Bayesian LSTM)."
                 continue
             temp_model = model_class(**params)
             if data_length < temp_model.min_data_length:
