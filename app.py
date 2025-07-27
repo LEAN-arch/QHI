@@ -1,24 +1,22 @@
 # ======================================================================================================
-# LottoSphere v25.0.2: Aletheia Engine (Dependency Fix Release)
+# LottoSphere v25.0.3: Aletheia Engine (Dependency Fix Release for Python 3.9)
 #
-# VERSION: 25.0.2
+# VERSION: 25.0.3
 #
 # DESCRIPTION:
-# Fixes "ERROR: Could not find a version that satisfies the requirement torchbnn==1.0.7" and
-# "Prediction Failed: Numpy is not available" errors by:
-# - Ensuring compatibility with Python 3.11 (Streamlit Community Cloud default).
-# - Using torchbnn==1.2 instead of 1.0.7.
-# - Adding explicit NumPy checks with uniform distribution fallbacks.
-# - Improving error messages for NumPy and torchbnn failures.
-# Maintains all features from v25.0.0: 5+1 architecture, System Health Check, pre-flight data
-# validation, full traceback visibility, and models (LSTM, GRU, Transformer, Bayesian LSTM,
-# Univariate Ensemble for Pos 6).
+# Addresses deployment errors from v25.0.2 on Streamlit Community Cloud (Python 3.9.23):
+# - Fixes `scipy==1.14.1` (requires Python >=3.10) by using `scipy==1.13.1`.
+# - Replaces `hdbscan==0.8.38` (unavailable) with `scikit-learn`'s `DBSCAN` for clustering.
+# - Maintains all features from v25.0.2: 5+1 architecture, System Health Check, pre-flight data
+#   validation, full traceback visibility, and models (LSTM, GRU, Transformer, Bayesian LSTM,
+#   Univariate Ensemble for Pos 6).
+# - Preserves NumPy checks to prevent `Numpy is not available` errors.
 #
-# CHANGELOG (v25.0.2):
-# - FIXED: torchbnn==1.0.7 installation error by updating to torchbnn==1.2.
-# - FIXED: Added NumPy import checks and fallbacks in predict methods.
-# - ENHANCED: Improved logging in data_warnings for better debugging.
-# - MAINTAINED: All models, System Health Check, and UI features from v25.0.0.
+# CHANGELOG (v25.0.3):
+# - FIXED: Replaced `hdbscan` with `DBSCAN` in `analyze_clusters` for Python 3.9 compatibility.
+# - FIXED: Updated `scipy` to 1.13.1 for Python 3.9.
+# - ENHANCED: Adjusted clustering parameters for `DBSCAN` to match `hdbscan` behavior.
+# - MAINTAINED: All models, System Health Check, and UI features from v25.0.2.
 # ======================================================================================================
 
 import streamlit as st
@@ -68,10 +66,10 @@ except ImportError:
     bnn = None
     st.warning("torchbnn not available, Bayesian LSTM disabled.")
 try:
-    import hdbscan
+    from sklearn.cluster import DBSCAN
 except ImportError:
-    hdbscan = None
-    st.warning("hdbscan not available, clustering disabled.")
+    DBSCAN = None
+    st.warning("DBSCAN not available, clustering disabled.")
 try:
     import umap
 except ImportError:
@@ -83,7 +81,7 @@ except ImportError:
     hmm = None
     st.warning("hmmlearn not available, HMM disabled.")
 
-st.set_page_config(page_title="LottoSphere v25.0.2: Aletheia Engine", page_icon="💡", layout="wide")
+st.set_page_config(page_title="LottoSphere v25.0.3: Aletheia Engine", page_icon="💡", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -378,7 +376,6 @@ class BayesianLSTMModel(BaseSequenceModel):
                 optimizer.step()
         st.session_state.data_warnings.append(f"Bayesian LSTM trained: {len(X)} sequences, {self.epochs} epochs.")
     def predict(self, full_history: pd.DataFrame, n_samples=50):
-<JAVASCRIPT_CODE_BLOCK>
         if not NUMPY_AVAILABLE:
             st.session_state.data_warnings.append("Bayesian LSTM: NumPy unavailable, returning uniform distributions.")
             return {'distributions': [{i: 1/max_num for i in range(1, max_num + 1)} for max_num in self.max_nums], 'uncertainty': 0.0}
@@ -389,6 +386,9 @@ class BayesianLSTMModel(BaseSequenceModel):
             raise RuntimeError("Model is not trained.")
         if full_history is None or full_history.empty:
             raise ValueError("Bayesian LSTM: full_history is None or empty.")
+        history_main = full_history.iloc[:, :5]
+        if len(history_main) < self.seq_length:
+            raise ValueError(f"Prediction history ({len(history_main)}) is less than sequence length ({self.seq_length}).")
         try:
             last_seq_scaled = self.scaler.transform(history_main.iloc[-self.seq_length:].values)
             input_tensor = torch.tensor(last_seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
@@ -708,17 +708,17 @@ def find_stabilization_point(_df: pd.DataFrame, _max_nums: List[int], backtest_s
     return fig
 
 @st.cache_data
-def analyze_clusters(_df: pd.DataFrame, min_cluster_size: int, min_samples: int) -> Dict[str, Any]:
+def analyze_clusters(_df: pd.DataFrame, eps: float, min_samples: int) -> Dict[str, Any]:
     if not NUMPY_AVAILABLE:
         st.session_state.data_warnings.append("Clustering: NumPy unavailable, cannot run.")
         return {'fig': go.Figure(), 'summary': "Clustering disabled: NumPy unavailable.", 'silhouette': "N/A"}
-    if not hdbscan or not umap:
-        st.session_state.data_warnings.append("Clustering disabled: hdbscan or umap-learn not installed.")
+    if not DBSCAN or not umap:
+        st.session_state.data_warnings.append("Clustering disabled: DBSCAN or umap-learn not installed.")
         return {'fig': go.Figure(), 'summary': "Clustering disabled: missing dependencies.", 'silhouette': "N/A"}
     df_main = _df.iloc[:, :5]
     results = {'fig': go.Figure(), 'summary': "Clustering failed.", 'silhouette': "N/A"}
-    if len(df_main) < max(10, min_cluster_size):
-        st.session_state.data_warnings.append(f"Clustering failed: Insufficient data ({len(df_main)} < {max(10, min_cluster_size)}).")
+    if len(df_main) < max(10, min_samples):
+        st.session_state.data_warnings.append(f"Clustering failed: Insufficient data ({len(df_main)} < {max(10, min_samples)}).")
         return results
     for col in df_main.columns:
         if len(df_main[col].unique()) < 5:
@@ -726,7 +726,7 @@ def analyze_clusters(_df: pd.DataFrame, min_cluster_size: int, min_samples: int)
             return results
     data = df_main.values
     try:
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples)
+        clusterer = DBSCAN(eps=eps, min_samples=min_samples)
         labels = clusterer.fit_predict(data)
         if len(set(labels)) <= 1 or np.all(labels == -1):
             st.session_state.data_warnings.append("Clustering failed: No valid clusters detected, using uniform.")
@@ -787,7 +787,7 @@ with st.sidebar.expander("System Health"):
         "TorchBNN": "Installed" if bnn else "NOT FOUND",
         "HMMlearn": "Installed" if hmm else "NOT FOUND",
         "NetworkX": "Installed" if nx else "NOT FOUND",
-        "HDBSCAN": "Installed" if hdbscan else "NOT FOUND",
+        "DBSCAN": "Installed" if DBSCAN else "NOT FOUND",
         "UMAP": "Installed" if umap else "NOT FOUND"
     }
     for lib, version in libs.items():
@@ -970,9 +970,9 @@ if uploaded_file:
                 **How to Use**: Use the largest cluster's centroid for conservative predictions.
             """)
             st.sidebar.header("3. Clustering Settings")
-            cluster_min_size = st.sidebar.slider("Minimum Cluster Size", 5, 50, 10, 1)
-            cluster_min_samples = st.sidebar.slider("Minimum Samples", 1, 20, 5, 1)
-            cluster_result = analyze_clusters(df.iloc[:, :5], cluster_min_size, cluster_min_samples)
+            cluster_eps = st.sidebar.slider("DBSCAN eps", 0.5, 5.0, 2.0, 0.1, help="Maximum distance between points in a cluster.")
+            cluster_min_samples = st.sidebar.slider("Minimum Samples", 1, 20, 5, 1, help="Minimum points to form a cluster.")
+            cluster_result = analyze_clusters(df.iloc[:, :5], cluster_eps, cluster_min_samples)
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.plotly_chart(cluster_result['fig'], use_container_width=True)
